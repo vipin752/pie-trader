@@ -1,0 +1,218 @@
+# ═══════════════════════════════════════════════════════════════
+#  PIE TRADER — Local Development Stack
+#  Company  : Neelkanth Trading | pietrader.in
+#  Phase    : 1 — Foundation
+#
+#  Port Map:
+#    5432  → PostgreSQL
+#    6379  → Redis
+#    9092  → Kafka
+#    2181  → Zookeeper
+#    8090  → Kafka UI
+#    5050  → pgAdmin
+#    8080  → API Gateway (Spring Boot)
+#    8001  → Python Analytics (FastAPI)
+#    3000  → React Frontend (Next.js)
+#
+#  Quick Start (infra only, recommended for dev):
+#    docker-compose up -d postgres redis kafka zookeeper kafka-ui pgadmin
+#
+#  Full stack:
+#    docker-compose --profile app up -d
+# ═══════════════════════════════════════════════════════════════
+
+networks:
+  pietrader-net:
+    driver: bridge
+
+volumes:
+  postgres-data:
+  redis-data:
+  zookeeper-data:
+  kafka-data:
+
+services:
+
+  # ── POSTGRESQL ─────────────────────────────────────────────
+  postgres:
+    image: postgres:16-alpine
+    container_name: pietrader-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: pietrader
+      POSTGRES_USER: pietrader
+      POSTGRES_PASSWORD: pietrader@2024
+      PGDATA: /var/lib/postgresql/data/pgdata
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+      - ./postgres/init.sql:/docker-entrypoint-initdb.d/01-init.sql:ro
+    networks:
+      - pietrader-net
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U pietrader -d pietrader"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # ── REDIS ──────────────────────────────────────────────────
+  redis:
+    image: redis:7-alpine
+    container_name: pietrader-redis
+    restart: unless-stopped
+    command: redis-server --requirepass pietrader@2024 --appendonly yes
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis-data:/data
+    networks:
+      - pietrader-net
+    healthcheck:
+      test: ["CMD", "redis-cli", "-a", "pietrader@2024", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # ── ZOOKEEPER ──────────────────────────────────────────────
+  zookeeper:
+    image: confluentinc/cp-zookeeper:7.5.0
+    container_name: pietrader-zookeeper
+    restart: unless-stopped
+    environment:
+      ZOOKEEPER_CLIENT_PORT: 2181
+      ZOOKEEPER_TICK_TIME: 2000
+    ports:
+      - "2181:2181"
+    volumes:
+      - zookeeper-data:/var/lib/zookeeper/data
+    networks:
+      - pietrader-net
+
+  # ── KAFKA ──────────────────────────────────────────────────
+  kafka:
+    image: confluentinc/cp-kafka:7.5.0
+    container_name: pietrader-kafka
+    restart: unless-stopped
+    depends_on:
+      - zookeeper
+    environment:
+      KAFKA_BROKER_ID: 1
+      KAFKA_ZOOKEEPER_CONNECT: zookeeper:2181
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: PLAINTEXT:PLAINTEXT,PLAINTEXT_HOST:PLAINTEXT
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:29092,PLAINTEXT_HOST://localhost:9092
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_AUTO_CREATE_TOPICS_ENABLE: "true"
+      KAFKA_LOG_RETENTION_HOURS: 168
+      KAFKA_CREATE_TOPICS: "pie.market.data:1:1,pie.option.chain:1:1,pie.analytics.results:1:1,pie.trade.events:1:1,pie.alerts:1:1"
+    ports:
+      - "9092:9092"
+    volumes:
+      - kafka-data:/var/lib/kafka/data
+    networks:
+      - pietrader-net
+
+  # ── KAFKA UI ───────────────────────────────────────────────
+  kafka-ui:
+    image: provectuslabs/kafka-ui:latest
+    container_name: pietrader-kafka-ui
+    restart: unless-stopped
+    depends_on:
+      - kafka
+    environment:
+      KAFKA_CLUSTERS_0_NAME: pietrader-local
+      KAFKA_CLUSTERS_0_BOOTSTRAPSERVERS: kafka:29092
+    ports:
+      - "8090:8080"
+    networks:
+      - pietrader-net
+
+  # ── PGADMIN ────────────────────────────────────────────────
+  pgadmin:
+    image: dpage/pgadmin4:latest
+    container_name: pietrader-pgadmin
+    restart: unless-stopped
+    environment:
+      PGADMIN_DEFAULT_EMAIL: admin@pietrader.in
+      PGADMIN_DEFAULT_PASSWORD: pietrader@2024
+    ports:
+      - "5050:80"
+    networks:
+      - pietrader-net
+    depends_on:
+      - postgres
+
+  # ── API GATEWAY (Spring Boot) — profile: app ───────────────
+  api-gateway:
+    build:
+      context: ../backend/pietrader-gateway
+      dockerfile: Dockerfile
+    container_name: pietrader-gateway
+    restart: unless-stopped
+    environment:
+      SPRING_PROFILES_ACTIVE: local
+      SPRING_DATASOURCE_URL: jdbc:postgresql://postgres:5432/pietrader
+      SPRING_DATASOURCE_USERNAME: pietrader
+      SPRING_DATASOURCE_PASSWORD: pietrader@2024
+      SPRING_DATA_REDIS_HOST: redis
+      SPRING_DATA_REDIS_PORT: 6379
+      SPRING_DATA_REDIS_PASSWORD: pietrader@2024
+      KAFKA_BOOTSTRAP_SERVERS: kafka:29092
+      JWT_SECRET: ${JWT_SECRET:-pietrader-jwt-secret-change-in-production-min32chars}
+      PYTHON_ANALYTICS_URL: http://python-analytics:8001
+      ANGELONE_API_KEY: J2Od6Mhm
+      ANGELONE_CLIENT_ID: NA
+      ANGELONE_TOTP_SECRET: fc709e9c-8fb7-459c-894b-cf63b824a7e6
+    ports:
+      - "8080:8080"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    networks:
+      - pietrader-net
+    profiles:
+      - app
+
+  # ── PYTHON ANALYTICS (FastAPI) — profile: app ─────────────
+  python-analytics:
+    build:
+      context: ../analytics
+      dockerfile: Dockerfile
+    container_name: pietrader-analytics
+    restart: unless-stopped
+    environment:
+      #DATABASE_URL: postgresql://pietrader:pietrader@2024@postgres:5432/pietrader
+      DATABASE_URL: postgresql://pietrader:pietrader%402024@postgres:5432/pietrader
+      #REDIS_URL: redis://:pietrader@2024@redis:6379/0
+      REDIS_URL: redis://:pietrader%402024@redis:6379/0
+      KAFKA_BOOTSTRAP_SERVERS: kafka:29092
+      APP_ENV: local
+    ports:
+      - "8001:8001"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - pietrader-net
+    profiles:
+      - app
+
+  # ── REACT FRONTEND (Next.js) — profile: app ───────────────
+  frontend:
+    build:
+      context: ../frontend
+      dockerfile: Dockerfile
+    container_name: pietrader-frontend
+    restart: unless-stopped
+    environment:
+      NEXT_PUBLIC_API_URL: http://localhost:8080
+      NEXT_PUBLIC_WS_URL: ws://localhost:8080/ws
+    ports:
+      - "3000:3000"
+    networks:
+      - pietrader-net
+    profiles:
+      - app
+      

@@ -1,0 +1,201 @@
+from __future__ import annotations
+
+import logging
+import asyncio
+
+from fastapi import FastAPI, HTTPException, Query, WebSocket
+from fastapi.middleware.cors import CORSMiddleware
+
+from service.option_service import OptionService
+from scanner.fno_scanner import FNOMarketScanner
+
+
+# ------------------------------------------------
+# Logging
+# ------------------------------------------------
+
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s | %(levelname)s | %(message)s"
+)
+
+logger = logging.getLogger(__name__)
+
+
+# ------------------------------------------------
+# FastAPI App (CREATE FIRST)
+# ------------------------------------------------
+
+app = FastAPI(
+    title="PIE Trader Option Intelligence",
+    description="Institution-grade Options Analytics Engine",
+    version="1.0"
+)
+
+
+# ------------------------------------------------
+# Enable CORS
+# ------------------------------------------------
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+
+# ------------------------------------------------
+# Initialize Services
+# ------------------------------------------------
+
+option_service = OptionService()
+scanner = FNOMarketScanner()
+
+
+# ------------------------------------------------
+# 🔥 WEBSOCKET (MOVE AFTER app INIT)
+# ------------------------------------------------
+
+@app.websocket("/ws/options")
+async def websocket_endpoint(websocket: WebSocket):
+    await websocket.accept()
+
+    while True:
+        try:
+            data = option_service.get_option_summary("NIFTY")
+
+            await websocket.send_json(data)
+
+            await asyncio.sleep(2)
+
+        except Exception as e:
+            print("WS error:", e)
+            break
+
+
+# ------------------------------------------------
+# Root Endpoint
+# ------------------------------------------------
+
+@app.get("/")
+def root():
+    return {
+        "service": "PIE Trader Option Intelligence",
+        "status": "running",
+        "version": "1.0"
+    }
+
+
+# ------------------------------------------------
+# Health Check
+# ------------------------------------------------
+
+@app.get("/health")
+def health():
+    return {"status": "UP"}
+
+
+# ------------------------------------------------
+# Option Summary
+# ------------------------------------------------
+
+@app.get("/option-summary")
+def option_summary(
+    symbol: str = Query(
+        ...,
+        description="Index symbol (NIFTY, BANKNIFTY, FINNIFTY, MIDCPNIFTY)"
+    )
+):
+    try:
+
+        symbol = str(symbol).upper()
+
+        logger.info(f"Processing option intelligence for {symbol}")
+
+        result = option_service.get_option_summary(symbol)
+
+        if not result:
+            raise HTTPException(
+                status_code=500,
+                detail=f"No option chain data returned from NSE for {symbol}"
+            )
+
+        return result
+
+    except Exception as e:
+        logger.exception("Option summary failed")
+
+        raise HTTPException(
+            status_code=500,
+            detail=str(e)
+        )
+
+
+# ------------------------------------------------
+# Scan Major Indices
+# ------------------------------------------------
+
+@app.get("/scan-indices")
+def scan_indices():
+
+    symbols = ["NIFTY", "BANKNIFTY", "FINNIFTY", "MIDCPNIFTY"]
+
+    results = {}
+
+    for symbol in symbols:
+        try:
+            logger.info(f"Scanning {symbol}")
+            results[symbol] = option_service.get_option_summary(symbol)
+
+        except Exception as e:
+            results[symbol] = {"error": str(e)}
+
+    return results
+
+
+# ------------------------------------------------
+# Parallel F&O Scanner
+# ------------------------------------------------
+
+@app.get("/scan-fno")
+def scan_fno():
+    try:
+        logger.info("Running parallel F&O scanner")
+        return scanner.scan()
+
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# ------------------------------------------------
+# Best Trade Finder
+# ------------------------------------------------
+
+@app.get("/best-trade")
+def best_trade():
+
+    symbols = ["NIFTY", "BANKNIFTY", "FINNIFTY", "MIDCPNIFTY"]
+
+    trades = []
+
+    for symbol in symbols:
+        try:
+            data = option_service.get_option_summary(symbol)
+
+            decision = data.get("final_trade_decision", {})
+
+            trades.append({
+                "symbol": symbol,
+                "decision": decision
+            })
+
+        except Exception as e:
+            trades.append({
+                "symbol": symbol,
+                "error": str(e)
+            })
+
+    return {"best_trades": trades}
+    
