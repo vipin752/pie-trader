@@ -1,0 +1,27 @@
+# PIE Trader rule set. Every number here is checked before an order is sent (Guard)
+# and replayed against your history (pie analyse).
+
+[risk]
+capital            = 200000   # trading capital, ₹
+max_daily_loss     = 4000     # ~2% of capital. Hit it → done for the day
+max_weekly_loss    = 10000    # hit it → done until Monday
+max_loss_per_trade = 1500     # entry × qty × stop_loss_pct must fit inside this
+stop_loss_pct      = 0.25     # stop at 25% of option premium
+max_lots           = 2        # per position, including adds
+
+[behaviour]
+max_trades_per_day     = 6    # new positions
+max_orders_per_day     = 20
+max_consecutive_losses = 2    # two losers in a row → stop
+cooldown_minutes       = 15   # after any loss, same underlying
+no_expiry_day_entries  = true # no new positions in a contract on its expiry day
+no_averaging_down      = true
+
+[session]
+flat_by           = "15:15"   # short-dated options closed by this time
+overnight_min_dte = 4         # only hold overnight with ≥4 days to expiry
+
+[lot_sizes]
+NIFTY = 65
+BANKNIFTY = 30
+SENSEX = 20
