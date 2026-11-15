@@ -3,7 +3,10 @@
 
 [risk]
 capital            = 200000   # trading capital, ₹
-max_daily_loss     = 4000     # ~2% of capital. Hit it → done for the day
+max_daily_loss     = 4000     # hit it → done for the day. (Your "10% daily" = 20000 —
+                              # the data says keep it far tighter; raise it only deliberately)
+daily_profit_target = 20000   # 10% of capital: once reached, stop and protect it (0 = off)
+stop_after_first_loss = true  # one booked loss → no more trades that day
 max_weekly_loss    = 10000    # hit it → done until Monday
 max_loss_per_trade = 1500     # entry × qty × stop_loss_pct must fit inside this
 stop_loss_pct      = 0.25     # stop at 25% of option premium
@@ -36,6 +39,7 @@ setups            = ["sweep_bos","trend_bos"]
 risk_per_trade    = 1500        # ₹ at the stop; lots are sized from this
 max_hold_days     = 3           # ride at most 3 sessions, entry day included
 overnight_min_r   = 1.0         # hold overnight only if ≥1R ahead with stop at breakeven
-min_rr_to_target  = 1.5         # skip if nearest opposing liquidity is closer than 1.5R
+min_rr_to_target  = 2.0         # take only trades with ≥1:2 room to the next liquidity
 partial_at_r      = 1.0         # book half at +1R, stop to breakeven
 partial_frac      = 0.5
+trail             = "r_ratchet" # +1R→breakeven, +2R→lock +1R, +3R→lock +2R, …

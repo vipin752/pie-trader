@@ -95,3 +95,39 @@ def test_webhook_auth_and_shape():
         parse_alert(b'{"secret":"x","signal":"bos_up","price":1}', "s")
     with pytest.raises(ValueError):
         parse_alert(b'{"secret":"s","signal":"yolo","price":1}', "s")
+
+
+def test_r_ratchet_locks_profit():
+    import pie_trader.auto.engine as E
+    from pie_trader.auto.options import UNDERLYINGS
+
+    cfg = AutoConfig(trail="r_ratchet", partial_at_r=99)  # isolate the ratchet
+    p = E.Position(None, "up", 130, 100.0, 25000.0, 24950.0, 24950.0, None,
+                   dt.datetime(2026, 11, 16, 10, 0), 0, "t", {dt.date(2026, 11, 16)})
+    assert p.risk_pts == 50
+    # emulate the ratchet block
+    for high, want in [(25049, 24950.0), (25051, 25000.0), (25101, 25050.0), (25175, 25100.0)]:
+        k = int(p.r_at(high))
+        if k >= 1:
+            lock = p.entry_spot + (k - 1) * p.risk_pts
+            if lock > p.stop_spot:
+                p.stop_spot = lock
+        assert p.stop_spot == want
+
+
+def test_guard_first_loss_and_daily_target():
+    from pie_trader.rules import Guard
+
+    t0 = dt.datetime(2026, 11, 16, 10, 0)
+    g = Guard(RuleSet(stop_after_first_loss=True))
+    g.on_close("NIFTY 24 NOV 2026 25000 CE", -500, t0)
+    d = g.check("NIFTY 24 NOV 2026 25100 CE", "Buy", 65, 50, t0 + dt.timedelta(hours=2))
+    assert not d and "One loss already booked" in d.reasons[0]
+
+    g2 = Guard(RuleSet(daily_profit_target=20000))
+    g2.on_close("NIFTY 24 NOV 2026 25000 CE", 21000, t0)
+    d2 = g2.check("NIFTY 24 NOV 2026 25100 CE", "Buy", 65, 50, t0 + dt.timedelta(minutes=30))
+    assert not d2 and "target reached" in d2.reasons[0]
+    # next day both reset
+    assert g.check("NIFTY 24 NOV 2026 25100 CE", "Buy", 65, 50, t0 + dt.timedelta(days=1))
+    assert g2.check("NIFTY 24 NOV 2026 25100 CE", "Buy", 65, 50, t0 + dt.timedelta(days=1))

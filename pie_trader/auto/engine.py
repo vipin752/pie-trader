@@ -32,13 +32,14 @@ class AutoConfig:
     stop_buffer_pct: float = 0.0002         # beyond the sweep/swing extreme
     min_stop_pct: float = 0.0005
     max_stop_pct: float = 0.006
-    min_rr_to_target: float = 1.5           # skip if the next liquidity is too close
+    min_rr_to_target: float = 2.0           # take only trades with ≥1:2 room to the next liquidity
     risk_per_trade: float = 1500.0          # ₹ lost if the stop is hit
     max_capital_frac: float = 0.25
     itm_steps: int = 0
     partial_at_r: float = 1.0               # book part, move stop to breakeven
     partial_frac: float = 0.5
-    trail: str = "structure"                # move stop to each new protected swing
+    trail: str = "structure"                # "structure": each new protected swing
+                                            # "r_ratchet": +1R→breakeven, +2R→lock +1R, +3R→lock +2R, …
     exit_on_opposing_sweep: bool = True     # liquidity taken against us → done
     max_hold_days: int = 3                  # sessions, entry day included
     overnight_min_r: float = 1.0            # hold overnight only with ≥1R open and stop ≥ breakeven
@@ -254,7 +255,16 @@ class Engine:
             p.stop_spot = max(p.stop_spot, p.entry_spot) if up else min(p.stop_spot, p.entry_spot)
             if not self.pos:
                 return
-        # 3. ride: trail to each new protected swing after a BOS our way
+        # 3a. R-ratchet trail: once +kR trades (k≥1), the stop locks +(k−1)R
+        if cfg.trail == "r_ratchet":
+            r_hi = p.r_at(c.high if up else c.low)
+            k = int(r_hi)
+            if k >= 1:
+                lock = p.entry_spot + (1 if up else -1) * (k - 1) * p.risk_pts
+                if (up and lock > p.stop_spot) or (not up and lock < p.stop_spot):
+                    p.stop_spot = lock
+                    p.log.append(f"{self.now:%d %b %H:%M} ratchet +{k}R hit → stop locks {'+' if k > 1 else ''}{k - 1}R ({lock:.1f})")
+        # 3b. ride: trail to each new protected swing after a BOS our way
         for ev in events:
             if ev.kind == "BOS" and ev.direction == p.direction and cfg.trail == "structure":
                 sw = [s for s in (self.ltf.lows if up else self.ltf.highs) if s.idx > p.entry_idx - cfg.swing_right]

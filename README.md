@@ -39,7 +39,7 @@ else:
 g.on_close(symbol, realised_pnl, now)
 ```
 
-The Guard blocks or warns on: the daily loss limit, losses in a row, the trade and order count, the cooldown, expiry-day entries, the lot cap, averaging down, per-trade risk at the stop, and new short-dated option positions after the `flat_by` time.
+The Guard blocks or warns on: the daily loss limit, the daily profit target (once hit, the day is done and the profit is protected), the first-loss stop (one booked loss → no more trades that day), losses in a row, the trade and order count, the cooldown, expiry-day entries, the lot cap, averaging down, per-trade risk at the stop, and new short-dated option positions after the `flat_by` time.
 
 ## Automated session engine
 
@@ -50,7 +50,7 @@ The Guard blocks or warns on: the daily loss limit, losses in a row, the trade a
 - **Session filter:** entries only inside configured windows (default 09:30–11:30 and 13:15–14:45); everything managed by 15:15.
 - **Options:** ATM CE/PE on the nearest expiry that outlives the ride, so a position is **never held on its own expiry day**.
 - **Sizing:** lots from ₹ risk at the stop (`risk_per_trade`), capped by `max_lots` and capital. Every order still passes the **Guard**.
-- **Riding the trade:** half booked at +1R and the stop moves to breakeven; then the stop trails each new protected swing after every BOS in our favour. Exits on CHoCH against, on opposing liquidity being swept, or on the **max 3-session time stop**. Overnight only with ≥1R of cushion and the stop at breakeven or better.
+- **Riding the trade:** two trail modes. `structure` — the stop follows each new protected swing after every BOS in our favour. `r_ratchet` (default preset) — the trade is only taken with ≥1:2 room; at +1R the stop moves to breakeven, at +2R it locks +1R, at +3R it locks +2R, and so on. Half is booked at +1R either way. Exits on CHoCH against, on opposing liquidity being swept, or on the **max 3-session time stop**. Overnight only with ≥1R of cushion and the stop at breakeven or better.
 
 ```bash
 pie backtest candles.csv --config rules.toml --report bot-report.html   # your own 5m underlying data

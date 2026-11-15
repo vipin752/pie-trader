@@ -15,6 +15,8 @@ SESSION_MINUTES = 375  # NSE 09:15–15:30
 class RuleSet:
     capital: float = 200_000
     max_daily_loss: float = 4_000          # ~2% of capital
+    daily_profit_target: float = 0         # ₹; >0 → stop trading for the day once reached
+    stop_after_first_loss: bool = False    # one booked loss → done for the day
     max_weekly_loss: float = 10_000
     max_loss_per_trade: float = 1_500      # enforced live by Guard (needs prices)
     stop_loss_pct: float = 0.25            # of option premium
@@ -140,6 +142,10 @@ def replay(episodes: list[Episode], rules: RuleSet) -> ReplayResult:
             streak = 0
         if run <= -rules.max_daily_loss:
             stopped = "Daily loss limit hit"
+        elif rules.stop_after_first_loss and pnl < 0:
+            stopped = "First loss booked — done for the day"
+        elif rules.daily_profit_target > 0 and run >= rules.daily_profit_target:
+            stopped = "Daily profit target reached"
         elif streak >= rules.max_consecutive_losses:
             stopped = "Consecutive-loss stop"
 
@@ -184,7 +190,7 @@ class Guard:
 
     def _reset(self, day):
         self.day, self.realised, self.trades, self.orders = day, 0.0, 0, 0
-        self.streak, self.last_loss_at = 0, {}
+        self.streak, self.losses_today, self.last_loss_at = 0, 0, {}
         self.positions: dict[str, list[float]] = {}  # symbol -> [qty, avg]
 
     def check(self, symbol: str, side: str, qty: int, price: float, now: dt.datetime,
@@ -199,6 +205,10 @@ class Guard:
         if opening:
             if self.realised <= -r.max_daily_loss:
                 why.append(f"Daily loss limit reached (₹{self.realised:,.0f}). Done for today.")
+            if r.stop_after_first_loss and self.losses_today >= 1:
+                why.append("One loss already booked today. Done for today.")
+            if r.daily_profit_target > 0 and self.realised >= r.daily_profit_target:
+                why.append(f"Daily target reached (₹{self.realised:,.0f}). Protect it — done for today.")
             if self.streak >= r.max_consecutive_losses:
                 why.append(f"{self.streak} losses in a row. Done for today.")
             if pos is None and self.trades >= r.max_trades_per_day:
@@ -247,9 +257,12 @@ class Guard:
                 del self.positions[symbol]
 
     def on_close(self, symbol: str, pnl: float, now: dt.datetime):
+        if now.date() != self.day:
+            self._reset(now.date())
         self.realised += pnl
         if pnl < 0:
             self.streak += 1
+            self.losses_today += 1
             self.last_loss_at[underlying(symbol)] = now
         else:
             self.streak = 0
@@ -257,11 +270,13 @@ class Guard:
 
 # Values that switch a rule off, for measuring each rule on its own.
 _OFF = {
-    "max_daily_loss": 1e12, "max_weekly_loss": 1e12, "max_lots": 10**6, "max_trades_per_day": 10**6,
+    "max_daily_loss": 1e12, "daily_profit_target": 0.0, "stop_after_first_loss": False, "max_weekly_loss": 1e12, "max_lots": 10**6, "max_trades_per_day": 10**6,
     "max_consecutive_losses": 10**6, "cooldown_minutes": 0, "no_expiry_day_entries": False,
     "no_averaging_down": False,
 }
 RULE_LABELS = {
+    "stop_after_first_loss": "Stop after the first loss",
+    "daily_profit_target": "Stop at the daily profit target",
     "no_expiry_day_entries": "No entries on expiry day",
     "max_lots": "Max lots per position",
     "no_averaging_down": "No averaging down",
