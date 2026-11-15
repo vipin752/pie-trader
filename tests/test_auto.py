@@ -361,3 +361,20 @@ def test_portfolio_backtest_blocks_simultaneous_correlated_positions():
         portfolio=pg2,
     )
     assert len(res2["NIFTY"].engine.closed) >= len(n_trades)
+
+
+def test_structure_bounds_memory_over_a_long_session():
+    from pie_trader.auto.structure import Structure
+
+    s = Structure(left=2, right=2, max_history=50)
+    t = dt.datetime(2026, 1, 1, 9, 15)
+    px = 100.0
+    rnd = __import__("random").Random(1)
+    for k in range(5000):  # far more candles than max_history
+        step = rnd.gauss(0, 0.3)
+        c = Candle(t, px, px + abs(step) + 0.1, px - abs(step) - 0.1, px + step)
+        s.update(c)
+        px += step
+        t += dt.timedelta(minutes=5)
+    assert len(s.highs) <= 50 and len(s.lows) <= 50 and len(s.events) <= 50
+    assert len(s.candles) == 5000  # candles themselves are a documented, separate scope boundary

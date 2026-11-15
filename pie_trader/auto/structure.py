@@ -32,6 +32,13 @@ class Structure:
     left: int = 3
     right: int = 3
     eq_tolerance: float = 0.0004  # equal highs/lows within 0.04 %
+    max_history: int = 500        # cap on highs/lows/events (space-complexity
+                                   # audit, Part K2: these three grew without
+                                   # bound over a long-running session before
+                                   # this was added; nothing elsewhere indexes
+                                   # into them by absolute position — only by
+                                   # .idx attribute, negative slices or
+                                   # reversed() — so trimming the front is safe)
     candles: list = field(default_factory=list)
     highs: list = field(default_factory=list)
     lows: list = field(default_factory=list)
@@ -48,6 +55,12 @@ class Structure:
         new += self._breaks(i, c)
         new += self._sweeps(i, c)
         self.events += new
+        if len(self.highs) > self.max_history:
+            del self.highs[: len(self.highs) - self.max_history]
+        if len(self.lows) > self.max_history:
+            del self.lows[: len(self.lows) - self.max_history]
+        if len(self.events) > self.max_history:
+            del self.events[: len(self.events) - self.max_history]
         return new
 
     # ── swings ──
