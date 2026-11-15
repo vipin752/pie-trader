@@ -191,7 +191,7 @@ def test_pdhl_breakout_signal():
         cs.append(C(t, 103.1, 103.4, 102.9, 103.2)); t += dt.timedelta(minutes=5)
     cfg = AutoConfig(underlying="NIFTY", setups=["pdhl_break"], windows=[["09:15", "15:15"]],
                      min_rr_to_target=0, atr_noise_floor=0, min_stop_pct=0, max_stop_pct=1,
-                     risk_per_trade=1e9, max_capital_frac=1e9)
+                     risk_per_trade=1e9, max_capital_frac=1e9, min_premium=0, max_premium_spread_pct=1.0)
     r = run_backtest(cs, cfg, RuleSet(capital=1e12, max_loss_per_trade=1e12, max_lots=1))
     assert any(tr.setup == "pdhl_break" and tr.direction == "up" for tr in r.engine.closed), r.engine.skips
 
@@ -292,3 +292,72 @@ def test_mtf_alignment_gate_blocks_against_engine_read():
     eng._maybe_enter(c, [Event(0, "BOS", "down", 99.0)], 0)
     assert any("Market Direction Engine" in b for b in blocked)
     assert "OPENED" not in blocked
+
+
+def test_premium_chart_gate_blocks_worthless_or_wide_spread():
+    from pie_trader.auto.premium import validate_premium
+
+    assert validate_premium(None, 80.0, 65)
+    cheap = validate_premium(None, 2.0, 65, min_premium=5.0)
+    assert not cheap and "below the" in cheap.reasons[0]
+    wide = validate_premium(None, 3.0, 65, min_premium=0, max_spread_pct=0.05)
+    assert not wide and "spread" in wide.reasons[0]
+    small = validate_premium(None, 50.0, 65, min_notional=1_000_000)
+    assert not small and "notional" in small.reasons[0]
+
+
+def test_instrument_master_covers_all_five_indices_with_correlation_group():
+    from pie_trader.auto.instruments import CORRELATION_GROUPS, SUPPORTED_INDICES, InstrumentMaster
+
+    assert set(SUPPORTED_INDICES) == {"NIFTY", "BANKNIFTY", "FINNIFTY", "MIDCPNIFTY", "SENSEX"}
+    im = InstrumentMaster()
+    for name in SUPPORTED_INDICES:
+        spec = im.get(name)
+        assert spec.lot > 0 and spec.strike_step > 0
+    assert im.get("SENSEX").exchange == "BSE"
+    assert im.get("NIFTY").exchange == "NSE"
+    assert im.is_stale()  # never refreshed yet
+    assert len({CORRELATION_GROUPS[n] for n in SUPPORTED_INDICES}) == 1  # one correlated group by default
+    with pytest.raises(KeyError):
+        im.get("NOTANINDEX")
+
+
+def test_instrument_master_loads_file_and_holidays(tmp_path):
+    from pie_trader.auto.instruments import InstrumentMaster
+
+    p = tmp_path / "m.json"
+    p.write_text('{"as_of":"2026-11-16","contracts":{"NIFTY":{"lot":75}},"holidays":["2026-01-26"]}')
+    im = InstrumentMaster()
+    im.load_file(p)
+    assert im.get("NIFTY").lot == 75 and im.get("NIFTY").source == "file"
+    assert not im.is_stale()
+    import datetime as _dt
+    assert not im.is_trading_day(_dt.date(2026, 1, 26))   # holiday
+    assert not im.is_trading_day(_dt.date(2026, 11, 14))  # Saturday
+    assert im.is_trading_day(_dt.date(2026, 11, 16))
+
+
+def test_portfolio_backtest_blocks_simultaneous_correlated_positions():
+    from pie_trader.auto.backtest import run_portfolio_backtest, synthetic_candles
+    from pie_trader.auto.portfolio import PortfolioGuard
+
+    n_candles = synthetic_candles(days=60, seed=2, spot=25000.0)
+    b_candles = synthetic_candles(days=60, seed=2, spot=52000.0)  # same seed → same signal timing
+    cfg_n = AutoConfig(underlying="NIFTY")
+    cfg_b = AutoConfig(underlying="BANKNIFTY")
+    pg = PortfolioGuard(max_concurrent=1, allow_same_group=False)
+    res = run_portfolio_backtest(
+        {"NIFTY": (n_candles, cfg_n, RuleSet()), "BANKNIFTY": (b_candles, cfg_b, RuleSet())},
+        portfolio=pg,
+    )
+    n_trades, b_trades = res["NIFTY"].engine.closed, res["BANKNIFTY"].engine.closed
+    # same signal timing on correlated indices → the second one must be rejected by the portfolio
+    assert any("portfolio" in reason for reason in res["BANKNIFTY"].engine.skips) or not b_trades or not n_trades
+    assert pg.open_positions == {}  # nothing left dangling after both finish
+    # allowing correlated exposure lets both trade their own setups independently
+    pg2 = PortfolioGuard(max_concurrent=2, allow_same_group=True)
+    res2 = run_portfolio_backtest(
+        {"NIFTY": (n_candles, cfg_n, RuleSet()), "BANKNIFTY": (b_candles, cfg_b, RuleSet())},
+        portfolio=pg2,
+    )
+    assert len(res2["NIFTY"].engine.closed) >= len(n_trades)

@@ -10,6 +10,7 @@ from ..rules import Guard, RuleSet
 from .broker import Broker
 from .candles import Candle
 from .options import OptionContract, Underlying, choose_contract, size_lots
+from .premium import validate_premium
 from .direction import MarketDirectionEngine
 from .regime import classify
 from .smc import SMC
@@ -46,6 +47,9 @@ class AutoConfig:
     min_stop_pct: float = 0.0005
     max_stop_pct: float = 0.006
     min_rr_to_target: float = 2.0           # take only trades with ≥1:2 room to the next liquidity
+    min_premium: float = 5.0                # Chart B gate: reject near-worthless contracts
+    max_premium_spread_pct: float = 0.08    # Chart B gate: modelled spread ceiling
+    min_notional: float = 0.0               # Chart B gate: premium × qty floor (0 = off)
     require_mtf_alignment: bool = False     # skip entries that disagree with the Market Direction
                                             # Engine's overall 15m/30m/60m/D/W/M read (off by default:
                                             # it only starts voting once weeks/months of data exist)
@@ -131,8 +135,9 @@ class ClosedTrade:
 
 class Engine:
     def __init__(self, cfg: AutoConfig, rules: RuleSet, u: Underlying, broker: Broker,
-                 pricer: Callable[[OptionContract, float, dt.datetime], float]):
+                 pricer: Callable[[OptionContract, float, dt.datetime], float], portfolio=None):
         self.cfg, self.rules, self.u, self.broker, self.pricer = cfg, rules, u, broker, pricer
+        self.portfolio = portfolio  # optional PortfolioGuard shared across indices (spec §5)
         self.ltf = Structure(cfg.swing_left, cfg.swing_right)
         self.htf = Structure(2, 2)
         self._htf_bar: Optional[Candle] = None
@@ -371,10 +376,22 @@ class Engine:
             self._skip("minimum position cannot fit inside the risk budget" if lots else "risk too large for 1 lot")
             return
         qty = lots * u.lot
+        # Chart B: the selected option premium must independently be tradable —
+        # a clean underlying signal alone never authorises the trade (spec §3).
+        pc = validate_premium(con, entry, qty, cfg.min_premium, cfg.max_premium_spread_pct, cfg.min_notional)
+        if not pc:
+            self._skip("Chart B (premium): " + pc.reasons[0])
+            return
         dec = self.guard.check(con.symbol, "Buy", qty, entry, self.now, risk=(entry - stop_prem) * qty)
         if not dec:
             self._skip("guard: " + dec.reasons[0].split(".")[0])
             return
+        if self.portfolio is not None:
+            pdec = self.portfolio.check(self.cfg.underlying)
+            if not pdec:
+                self._skip("portfolio: " + pdec.reasons[0])
+                return
+            self.portfolio.register_open(self.cfg.underlying)
         self._pending, self.mark_spot = con, spot
         f = self.broker.place_market(con.symbol, "Buy", qty, self.now)
         self.guard.on_fill(con.symbol, "Buy", qty, f.price, self.now)
@@ -400,6 +417,8 @@ class Engine:
         p.log.append(f"{self.now:%d %b %H:%M} {reason}: sell {qty} @ {f.price} spot {spot:.1f}")
         if p.qty == 0:
             self.guard.on_close(p.contract.symbol, p.realised, self.now)
+            if self.portfolio is not None:
+                self.portfolio.register_close(self.cfg.underlying)
             init_risk_inr = max(1.0, p.risk_inr)
             self.closed.append(ClosedTrade(p.contract.symbol, p.setup, p.direction, p.opened, self.now,
                                            p.init_qty, p.entry_prem, p.realised,

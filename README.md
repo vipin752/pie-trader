@@ -48,13 +48,15 @@ The Guard blocks or warns on: the daily loss limit, the post-target giveback flo
 - **Structure (SMC/ICT first):** swing highs/lows on closed candles, **BOS**, **CHoCH**, **liquidity** (untaken swings, PDH/PDL) and sweeps. On top of that, `auto/smc.py` tracks **order blocks** (last opposite-close candle before a break, until mitigated or invalidated), **fair value gaps**, the **dealing range with premium/discount** (retracement longs only in discount, shorts only in premium) and the **OTE 62–79% pocket**.
 - **Setups:** `sweep_bos` — liquidity is swept, then price breaks structure the other way; `trend_bos` — a BOS in the direction of the 15-minute trend; `pdhl_break` — a >80%-body close beyond the previous day's high/low (first candle is observation only); `ob_mitigation` — price returns to a fresh order block/FVG with the higher-timeframe trend and a confirming close; `or_fib` — a dominant-body close beyond the 138.2% extension of the opening 15-minute body (minimum 20-point body). Stop-and-reverse is never automatic: a failed PDH/PDL breakout only arms the reverse, which still needs its own BOS/CHoCH, sizing and Guard approval. Stops must clear an ATR noise floor. Every closed trade is journalled with the market regime and volatility state at entry (`--journal journal.json`).
 - **Session filter:** three entry windows — 09:20, 11:30 and 13:45 (one trade per window by default); everything managed by 15:15.
-- **Options:** ATM CE/PE on the nearest expiry that outlives the ride, so a position is **never held on its own expiry day**.
-- **Sizing:** lots from ₹ risk at the stop (`risk_per_trade`), capped by `max_lots` and capital. Every order still passes the **Guard**.
+- **Options (Chart B):** ATM CE/PE on the nearest expiry that outlives the ride, so a position is **never held on its own expiry day**. The underlying's structure (Chart A) finding a setup is never enough by itself — `auto/premium.py` independently checks the *selected contract*: rejects near-worthless premium and a modelled spread too wide to trade (`min_premium`, `max_premium_spread_pct`). Both charts must pass.
+- **Multi-index (spec §1):** `pie_trader/auto/instruments.py` is the Exchange & Contract Intelligence module — lot size, strike step, expiry weekday, exchange and tick size for all five supported indices (**NIFTY, BANKNIFTY, FINNIFTY, MIDCPNIFTY, SENSEX**), loadable from a refreshed broker scrip-master file (`InstrumentMaster.load_file`, see `instruments.sample.json`) rather than trusted as hardcoded. `pie_trader/auto/portfolio.py` is the portfolio-level exposure control: a shared `PortfolioGuard` blocks a second position opening while one is already open, and specifically blocks correlated indices from being open at once (by default all five are one correlation group) — run several together with `pie portfolio --indices NIFTY,BANKNIFTY,SENSEX`.
+- **Sizing:** lots from ₹ risk at the stop (`risk_per_trade`), capped by `max_lots`/`min_lots` and capital. Every order still passes the **Guard**, then the **PortfolioGuard** if one is configured.
 - **Riding the trade:** two trail modes. `structure` — the stop follows each new protected swing after every BOS in our favour. `r_ratchet` (default preset) — the trade is only taken with ≥1:2 room; at +1R the stop moves to breakeven, at +2R it locks +1R, at +3R it locks +2R, and so on. Half is booked at +1R either way. Exits on CHoCH against, on opposing liquidity being swept, or on the **max 3-session time stop**. Overnight only with ≥1R of cushion and the stop at breakeven or better.
 
 ```bash
 pie backtest candles.csv --config rules.toml --report bot-report.html   # your own 5m underlying data
 pie backtest                                                            # synthetic demo, results meaningless
+pie portfolio --indices NIFTY,BANKNIFTY,SENSEX                         # multi-index, shared PortfolioGuard
 pie auto webhook …  # see below
 ```
 
@@ -82,9 +84,12 @@ pie_trader/
   detectors.py behavioural findings with ₹ impact and the rule that fixes each
   rules.py     RuleSet (TOML), historical replay, per-rule impact, live Guard
   report.py    self-contained HTML report
-  cli.py       `pie analyse` / `pie backtest` / `pie webhook`
+  cli.py       `pie analyse` / `pie backtest` / `pie portfolio` / `pie webhook`
   auto/        automated engine: candles, structure (BOS/CHoCH/liquidity),
-               option selection, sizing, paper broker, backtest, TV webhook
+               SMC (order blocks/FVG/premium-discount), option selection +
+               Chart B premium validation, instrument master (5 indices),
+               portfolio exposure control, sizing, paper broker, backtest,
+               TV webhook, broker adapter scaffold
 design/        PIE design system: tokens.json, pie.css, README
 tests/
 ```

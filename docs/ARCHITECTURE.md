@@ -133,6 +133,12 @@ comparison → live only after explicit approval.
 | PDH/PDL breakout setup, 26-SMA filter, stop-and-reverse | ✅ `auto/engine.py` |
 | Guard: daily loss, first-loss stop, target-minimum + giveback floor, cooldown, lot caps, expiry ban | ✅ `rules.py` |
 | Option chain / futures / PCR / VIX / breadth intelligence | ⬜ needs market-data feeds (broker API or NSE data) — inputs are marked unavailable, never invented |
+| SMC/ICT: order blocks, FVG, premium/discount, OTE | ✅ `auto/smc.py`, setups `ob_mitigation`/`or_fib` use it; `pd_filter`/`ote_filter` toggles |
+| Dual-chart analysis (Chart A underlying, Chart B option premium, neither alone authorises) | ✅ Chart A = structure/SMC/regime on the underlying (as above); Chart B = `auto/premium.py` (`validate_premium`) checks the **selected contract's** premium floor and modelled spread before `_open` proceeds; both must pass. The spread model is a stand-in for a real bid/ask — flagged in its own docstring, not a quote |
+| Multi-index scope (NIFTY, BANKNIFTY, FINNIFTY, MIDCPNIFTY, SENSEX) | ✅ `auto/instruments.py` (`SUPPORTED_INDICES`, `InstrumentMaster`, loadable from a refreshed scrip-master file, `instruments.sample.json`) — static fallback clearly labelled, never trusted as a live source |
+| Exchange & Contract Intelligence (lot size, strike step, expiry weekday, holidays, staleness) | ✅ `auto/instruments.py` — `is_stale()`, `is_trading_day()`, `load_file()`; `refresh_from_broker()` raises until a validated adapter exists (same posture as the Angel One scaffold) |
+| Portfolio-level exposure & correlated-risk control | ✅ `auto/portfolio.py` (`PortfolioGuard`): default **1 position across the whole portfolio**, blocks a second index opening while any correlated one (default: all five) is already open; `Candidate`/`rank()` for comparing setups across indices. `auto/backtest.py::run_portfolio_backtest` steps multiple indices in one shared chronological order so the guard's state is honoured in real time, not per-index in isolation — proven in `test_portfolio_backtest_blocks_simultaneous_correlated_positions` |
+| Independently configurable strategy per index | ✅ mechanically — each index gets its own `AutoConfig`/`RuleSet`; ⬜ no per-index threshold research done yet (needs real data per index, spec §6) |
 | Dynamic timeframe selection with hysteresis + audit log | ⬜ pending |
 | Kafka/Java/Redis/Postgres production split | ⬜ pending — current Python package is the research/paper core |
 | Walk-forward validation harness | ⬜ pending real historical data |

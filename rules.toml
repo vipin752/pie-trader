@@ -28,9 +28,14 @@ flat_by           = "15:15"   # short-dated options closed by this time
 overnight_min_dte = 4         # only hold overnight with ≥4 days to expiry
 
 [lot_sizes]
+# FALLBACK ONLY — verify against pie_trader.auto.instruments.InstrumentMaster
+# (refreshed from your broker's scrip master) before trading any of these.
 NIFTY = 65
 BANKNIFTY = 30
+FINNIFTY = 60
+MIDCPNIFTY = 120
 SENSEX = 20
+BANKEX = 30
 
 [auto]                          # automated session engine (pie backtest / webhook)
 underlying        = "NIFTY"
@@ -52,3 +57,16 @@ partial_at_r      = 1.0         # book half at +1R, stop to breakeven
 partial_frac      = 0.5
 trail             = "r_ratchet" # +1R→breakeven, +2R→lock +1R, +3R→lock +2R, …
 allow_reverse_scalp = true      # profitable CHoCH exit → the flip may be traded the other way
+min_premium       = 5           # Chart B gate: reject near-worthless contracts
+max_premium_spread_pct = 0.08   # Chart B gate: modelled spread ceiling (replace with real quotes live)
+
+# ── Multi-index (spec §1, §5) ──
+# This [auto] block is ONE index's config. Each of NIFTY, BANKNIFTY, FINNIFTY,
+# MIDCPNIFTY and SENSEX gets its own copy with independently tuned thresholds
+# — do not assume the same stop distance or volatility threshold works across
+# all five. `pie portfolio --indices NIFTY,BANKNIFTY,SENSEX` runs several at
+# once sharing one PortfolioGuard: by default at most 1 position open across
+# the whole portfolio, and never two positions in the same correlation group
+# (all five are grouped together by default — they move together under most
+# regimes). Raise --max-concurrent / pass --allow-correlated only with
+# evidence that the indices you're opening together actually decouple.

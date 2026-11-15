@@ -18,10 +18,18 @@ class Underlying:
     iv: float             # annualised, for the paper model
 
 
+# FALLBACK ONLY — for offline paper-trading tests before a broker instrument
+# master is wired in. NSE/BSE have repeatedly revised lot sizes, expiry
+# weekdays and even which of these contracts trade weekly vs monthly (or at
+# all). Never trust these for a real order — pie_trader.auto.instruments
+# .InstrumentMaster is the module that should be refreshed from your
+# broker's live scrip master and consulted instead (spec §4).
 UNDERLYINGS = {
     "NIFTY": Underlying("NIFTY", 65, 50, 1, 0.13),
-    "SENSEX": Underlying("SENSEX", 20, 100, 3, 0.14),
-    "BANKNIFTY": Underlying("BANKNIFTY", 30, 100, 1, 0.15),  # monthly in practice; use broker list live
+    "BANKNIFTY": Underlying("BANKNIFTY", 30, 100, 1, 0.15),       # monthly-only in practice at times — verify
+    "FINNIFTY": Underlying("FINNIFTY", 40, 50, 1, 0.14),          # NSE has suspended/relisted this contract before — verify it is even listed
+    "MIDCPNIFTY": Underlying("MIDCPNIFTY", 75, 25, 1, 0.16),      # verify current listing and lot size
+    "SENSEX": Underlying("SENSEX", 20, 100, 3, 0.14),             # BSE
 }
 
 

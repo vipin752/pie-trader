@@ -32,6 +32,13 @@ def main(argv=None):
     b.add_argument("--report", default=None, help="Also run the discipline report on the bot's fills")
     b.add_argument("--journal", default=None, help="Write a JSON journal: one record per trade with regime/vol context")
 
+    pf = sub.add_parser("portfolio", help="Multi-index backtest (one shared PortfolioGuard across indices)")
+    pf.add_argument("--indices", required=True, help="comma-separated: NIFTY,BANKNIFTY,SENSEX,...")
+    pf.add_argument("--config", default=None, help="TOML with an [auto] section, applied to every index")
+    pf.add_argument("--rules", default=None)
+    pf.add_argument("--max-concurrent", type=int, default=1)
+    pf.add_argument("--allow-correlated", action="store_true")
+
     w = sub.add_parser("webhook", help="TradingView webhook listener (signals only; paper unless a live broker is configured)")
     w.add_argument("--secret", required=True)
     w.add_argument("--port", type=int, default=8787)
@@ -39,6 +46,8 @@ def main(argv=None):
 
     if args.cmd == "backtest":
         return _backtest(args)
+    if args.cmd == "portfolio":
+        return _portfolio(args)
     if args.cmd == "webhook":
         return _webhook(args)
 
@@ -110,6 +119,36 @@ def _backtest(args):
         with open(args.report, "w") as fh:
             fh.write(render(res.trades, epi, detect(res.trades, epi, rules), replay(epi, rules), rules, rule_impact(epi, rules)))
         print("Report:", args.report)
+
+
+def _portfolio(args):
+    from .auto.backtest import run_portfolio_backtest, synthetic_candles
+    from .auto.engine import AutoConfig
+    from .auto.instruments import SUPPORTED_INDICES
+    from .auto.portfolio import PortfolioGuard
+
+    names = [n.strip().upper() for n in args.indices.split(",")]
+    bad = set(names) - set(SUPPORTED_INDICES)
+    if bad:
+        print(f"Unsupported index/indices: {sorted(bad)}. Supported: {sorted(SUPPORTED_INDICES)}")
+        return
+    rules = RuleSet.load(args.rules)
+    indices = {}
+    for k, name in enumerate(names):
+        cfg = AutoConfig.load(args.config)
+        cfg.underlying = name
+        print(f"No live feed wired for 'portfolio' yet — using a SYNTHETIC stream for {name}. "
+              "Results mean nothing for real markets.")
+        indices[name] = (synthetic_candles(days=60, seed=2 + k), cfg, rules)
+    pg = PortfolioGuard(max_concurrent=args.max_concurrent, allow_same_group=args.allow_correlated)
+    results = run_portfolio_backtest(indices, portfolio=pg)
+    for name, res in results.items():
+        s = res.summary()
+        if not s["trades"]:
+            print(f"{name}: no trades. Skips: {s['skips']}")
+            continue
+        print(f"{name}: {s['trades']} trades · win {s['win_rate']:.0%} · net {inr(s['net'])} "
+              f"· portfolio-blocked {res.engine.skips.get('portfolio', 0)}")
 
 
 def _webhook(args):

@@ -11,7 +11,8 @@ from ..rules import RuleSet
 from .broker import PaperBroker, fills_to_trades
 from .candles import Candle
 from .engine import AutoConfig, Engine
-from .options import UNDERLYINGS, bs_price
+from .instruments import InstrumentMaster
+from .options import bs_price
 
 
 @dataclass
@@ -55,13 +56,14 @@ class BacktestResult:
         }
 
 
-def run_backtest(candles: list[Candle], cfg: AutoConfig, rules: RuleSet) -> BacktestResult:
-    u = UNDERLYINGS[cfg.underlying]
+def run_backtest(candles: list[Candle], cfg: AutoConfig, rules: RuleSet, master: InstrumentMaster | None = None,
+                 portfolio=None) -> BacktestResult:
+    u = (master or InstrumentMaster()).get(cfg.underlying)
     u_iv = u.iv
     pricer = lambda con, spot, ts: bs_price(spot, con, ts, u_iv)
     holder = {}
     broker = PaperBroker(lambda sym: holder["e"].mark(sym))
-    eng = Engine(cfg, rules, u, broker, pricer)
+    eng = Engine(cfg, rules, u, broker, pricer, portfolio=portfolio)
     holder["e"] = eng
     for c in candles:
         eng.on_candle(c)
@@ -99,3 +101,41 @@ def synthetic_candles(days=40, start=dt.date(2026, 9, 1), spot=25000.0, tf=5, se
                     drift = rnd.choice([-1, 0, 1]) * spot * 0.00015
         d += dt.timedelta(days=1)
     return out
+
+
+def run_portfolio_backtest(indices: dict, master: "InstrumentMaster | None" = None,
+                           portfolio=None) -> dict:
+    """Backtest several indices together, stepping every Engine in one shared
+    chronological order so a PortfolioGuard's "already open" state is honoured
+    across indices in real time rather than per-index in isolation.
+
+    `indices`: {name: (candles, AutoConfig, RuleSet)}. Each AutoConfig.underlying
+    must match its dict key. Returns {name: BacktestResult}.
+    """
+    from .portfolio import PortfolioGuard
+
+    master = master or InstrumentMaster()
+    portfolio = portfolio if portfolio is not None else PortfolioGuard()
+    engines, results = {}, {}
+    events = []  # (timestamp, name, candle)
+    for name, (candles, cfg, rules) in indices.items():
+        if cfg.underlying != name:
+            raise ValueError(f"indices[{name!r}].underlying is {cfg.underlying!r}, must match its key")
+        u = master.get(name)
+        pricer = lambda con, spot, ts, _iv=u.iv: bs_price(spot, con, ts, _iv)
+        holder = {}
+        broker = PaperBroker(lambda sym, _h=holder: _h["e"].mark(sym))
+        eng = Engine(cfg, rules, u, broker, pricer, portfolio=portfolio)
+        holder["e"] = eng
+        engines[name] = (eng, broker, candles)
+        events += [(c.ts, name, c) for c in candles]
+    events.sort(key=lambda e: e[0])
+    for _, name, c in events:
+        engines[name][0].on_candle(c)
+    for name, (eng, broker, candles) in engines.items():
+        if candles:
+            eng.force_close(candles[-1].close)
+        trades = fills_to_trades(broker.fills())
+        gross = sum(t.pnl for t in eng.closed)
+        results[name] = BacktestResult(eng, trades, gross, estimate_charges(trades))
+    return results
