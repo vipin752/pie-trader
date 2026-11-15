@@ -1,0 +1,60 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
+  <modelVersion>4.0.0</modelVersion>
+
+  <parent>
+    <groupId>org.springframework.boot</groupId>
+    <artifactId>spring-boot-starter-parent</artifactId>
+    <!-- Latest stable Spring Boot (Spring Framework 7 baseline) as of this build;
+         confirmed against Maven Central on 2026-11-16. Re-check before a real deploy. -->
+    <version>4.1.2</version>
+    <relativePath/>
+  </parent>
+
+  <groupId>com.pietrader</groupId>
+  <artifactId>pie-risk-engine</artifactId>
+  <version>0.1.0</version>
+  <name>pie-risk-engine</name>
+  <description>
+    Deterministic risk-approval service (spec §13: "Java must remain
+    responsible for deterministic execution and risk enforcement. Python
+    analytics must not bypass the Java risk approval process.") This is a
+    first Java port of pie_trader.rules.Guard's core checks — proof that the
+    Java 25 + Spring Boot toolchain decision actually builds and tests clean,
+    not just a decision on paper.
+  </description>
+
+  <properties>
+    <!-- Java 25 LTS (released Sept 2025, the first LTS after 21). Confirmed
+         installed and running in this environment: `openjdk 25.0.5.0.3`. -->
+    <java.version>25</java.version>
+    <maven.compiler.release>25</maven.compiler.release>
+    <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
+  </properties>
+
+  <dependencies>
+    <dependency>
+      <groupId>org.springframework.boot</groupId>
+      <artifactId>spring-boot-starter-web</artifactId>
+    </dependency>
+    <dependency>
+      <groupId>org.springframework.boot</groupId>
+      <artifactId>spring-boot-starter-validation</artifactId>
+    </dependency>
+    <dependency>
+      <groupId>org.springframework.boot</groupId>
+      <artifactId>spring-boot-starter-test</artifactId>
+      <scope>test</scope>
+    </dependency>
+  </dependencies>
+
+  <build>
+    <plugins>
+      <plugin>
+        <groupId>org.springframework.boot</groupId>
+        <artifactId>spring-boot-maven-plugin</artifactId>
+      </plugin>
+    </plugins>
+  </build>
+</project>

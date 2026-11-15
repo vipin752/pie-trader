@@ -92,7 +92,13 @@ pie_trader/
                TV webhook, broker adapter scaffold
 design/        PIE design system: tokens.json, pie.css, README
 tests/
+java/
+  pie-risk-engine/  Java 25 + Spring Boot 4.1.2 — first production-stack module,
+                    a working port of the deterministic Guard checks (own README,
+                    own tests: `cd java/pie-risk-engine && mvn test`)
 ```
+
+The production backend is anchored on **Java 25 (LTS)** — see `docs/ARCHITECTURE.md` §13 for the full stack decision (Spring Boot 4.1.2, Kafka, Postgres, Redis, Next.js, where AI/ML and an LLM each fit and where they're deliberately kept out of the risk path) and `java/pie-risk-engine/README.md` for the first working module.
 
 ## Limits of the replay
 

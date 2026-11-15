@@ -7,3 +7,5 @@ __pycache__/
 data/
 pie-report.html
 *.report.html
+# Java build output (java/pie-risk-engine)
+java/**/target/

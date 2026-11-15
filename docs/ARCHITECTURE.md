@@ -98,10 +98,48 @@ specs/lot sizes · reject the trade if the minimum position cannot fit inside
 risk and margin · BTST separate from intraday.
 
 ## 13. Technology
-Java 21 + Spring Boot 3 (deterministic execution, risk, APIs, security),
-Python FastAPI (quant analytics/research), Kafka, Redis, PostgreSQL,
-Next.js/React/TS, Docker + CI/CD. Python analytics never bypass Java risk
-approval.
+
+**Updated 2026-11-16: anchored on Java 25 LTS** (owner's decision), superseding
+the Java 21 line below. Every version here was checked live against Maven
+Central / npm on that date — re-check before trusting this file months later.
+
+| Layer | Choice | Why, grounded |
+|---|---|---|
+| **Core backend** (deterministic execution, risk, APIs, security) | **Java 25 (LTS)**, Spring Boot **4.1.2** | 25 is the first LTS after 21 (Sept 2025). Confirmed installed and building clean in this environment (`openjdk 25.0.5.0.3`); `java/pie-risk-engine` is a working proof — `mvn test`/`package` both pass on it. 4.1.2 is Maven Central's latest *stable* Spring Boot (4.2.0 is still RC) and runs on Spring Framework 7 / Jakarta EE, fully supporting 25. Build tool: **Maven**, not Gradle — Gradle 8.14 can target a Java 25 *toolchain* but running Gradle's own process on 25 adds friction not worth fighting pre-Phase-1; revisit once there are enough modules to want a Gradle version catalog. |
+| **Messaging** | Kafka, `kafka-clients` **4.4.0**, `spring-kafka` **4.1.2** | Latest stable on Maven Central. Topics as listed in §9. |
+| **Datastores** | PostgreSQL (driver **42.7.14**), Redis | Postgres for the audit trail / journal / configs (spec §9); Redis for live state and the shared "what's open right now" the Guard/Portfolio layer needs across instances. |
+| **Quant/research/ML** | Python, FastAPI | Unchanged — this is still where `pie_trader/` lives today. Python analytics **never** bypasses the Java risk engine; it proposes, Java approves (spec §13's own rule, kept). |
+| **Frontend** | Next.js **16.4.6**, React, TypeScript | Latest stable on npm as of this date. |
+| **CI/CD** | Docker + whatever CI the team already runs | Not re-decided here; nothing version-specific to ground. |
+
+### AI/ML — where it fits and where it is kept out
+
+Two separate things both get called "AI" in this project; they must not be
+confused with each other:
+
+1. **Quantitative / statistical modelling** (the actual decision-support
+   work in §2, §5, §7, §11): classical, auditable methods first —
+   regression/classification for regime and setup-quality calibration
+   (e.g. scikit-learn), walk-forward validated, every output traceable to
+   its inputs (spec §14.10). A sequence model (e.g. PyTorch) is a later
+   escalation, used only if a classical model demonstrably can't capture
+   something and the escalation itself is backtested and out-of-sample
+   validated like any other strategy change (spec §11, §14.9) — never
+   adopted because deep learning sounds more impressive. **This layer never
+   outputs a trade; it outputs a feature or a calibrated probability that
+   feeds the deterministic Setup/Risk engines.**
+2. **An LLM (e.g. Claude) for explanation, not decision**: narrating the
+   *already-recorded* structured decision trail (regime, setup, evidence,
+   R:R, stop/target reasoning — everything the journal in §9 captures) into
+   a weekly/monthly review a human reads, or answering "why did it take
+   this trade" from the journal's own fields. It must never be given the
+   power to approve a trade, size a position, or move a stop — that would
+   violate the same rule that keeps Python analytics out of the Java risk
+   path (spec §13, §14.5/§14.6). If it ever drafts a parameter change (e.g.
+   "this stop model underperforms in COMPRESSION regime, consider X"), that
+   suggestion goes through the same backtest/walk-forward/out-of-sample
+   gate as a human's idea would — spec §14.9 makes no exception for where
+   an idea came from.
 
 ## 14. Non-negotiables
 1. No permanently fixed analytical timeframe. 2. No universal ATR/stop.
