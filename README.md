@@ -46,7 +46,7 @@ The Guard blocks or warns on: the daily loss limit, the post-target giveback flo
 `pie_trader/auto/` turns the rules into an automated option strategy on market structure:
 
 - **Structure:** swing highs/lows on closed candles, **BOS** (break of structure), **CHoCH** (change of character) and **liquidity** (untaken swings, equal highs/lows, previous-day high/low). Sweeps are wicks through a pool that close back inside.
-- **Setups:** `sweep_bos` — liquidity is swept, then price breaks structure the other way; `trend_bos` — a BOS in the direction of the 15-minute trend.
+- **Setups:** `sweep_bos` — liquidity is swept, then price breaks structure the other way; `trend_bos` — a BOS in the direction of the 15-minute trend; `pdhl_break` — a >80%-body close beyond the previous day's high/low (first candle of the day is observation only), with stop-and-reverse when a failed breakout's stop candle closes strongly the other way. Optional 26-SMA direction filter. Stops must clear an ATR noise floor.
 - **Session filter:** three entry windows — 09:20, 11:30 and 13:45 (one trade per window by default); everything managed by 15:15.
 - **Options:** ATM CE/PE on the nearest expiry that outlives the ride, so a position is **never held on its own expiry day**.
 - **Sizing:** lots from ₹ risk at the stop (`risk_per_trade`), capped by `max_lots` and capital. Every order still passes the **Guard**.
@@ -70,6 +70,8 @@ pie webhook --secret <random> --port 8787
 Point a TradingView alert at `http://<your-host>:8787/tv` with message
 `{"secret":"<random>","signal":"bos_up","price":{{close}},"time":"{{timenow}}"}`.
 TradingView only reports what happened on the chart; PIE still applies the session window, option selection, sizing and the Guard. Live broker adapters plug into `auto/broker.py::make_broker` and require `live=True` plus your API keys in environment variables — **paper mode is the default everywhere**.
+
+See `docs/ARCHITECTURE.md` (the owner's master spec with an implementation-status map), `docs/PLAYBOOK.md` (the distilled rulebook: what is enforced in code vs manual discipline vs waiting on data feeds), `pie_trader/auto/volatility.py` (per-timeframe ATR with percentile states) and `pie_trader/auto/regime.py` (price-based regime classification; VIX/PCR/OI/breadth are marked unavailable until a data feed exists — never invented).
 
 ## Layout
 

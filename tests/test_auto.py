@@ -136,3 +136,61 @@ def test_guard_first_loss_and_daily_target():
     # next day both reset
     assert g.check("NIFTY 24 NOV 2026 25100 CE", "Buy", 65, 50, t0 + dt.timedelta(days=1))
     assert g2.check("NIFTY 24 NOV 2026 25100 CE", "Buy", 65, 50, t0 + dt.timedelta(days=1))
+
+
+def test_volatility_percentile_and_state():
+    from pie_trader.auto.volatility import VolatilityEngine
+
+    v = VolatilityEngine(period=5, window=100)
+    t = dt.datetime(2026, 11, 16, 9, 15)
+    for k in range(60):  # quiet
+        v.update(5, Candle(t, 100, 100.5, 99.5, 100))
+        t += dt.timedelta(minutes=5)
+    assert v.state(5) in ("normal", "compression")
+    for k in range(10):  # burst
+        v.update(5, Candle(t, 100, 104, 96, 100))
+        t += dt.timedelta(minutes=5)
+    assert v.state(5) == "expansion"
+    assert v.percentile(5) > 0.9
+
+
+def test_regime_classifier():
+    from pie_trader.auto.regime import classify
+    from pie_trader.auto.structure import Structure
+    from pie_trader.auto.volatility import VolatilityEngine
+
+    htf, ltf, vol = Structure(1, 1), Structure(1, 1), VolatilityEngine()
+    t = dt.datetime(2026, 11, 10, 9, 15)
+    px = 100.0
+    for k in range(40):  # staircase up: HH/HL sequence with pullbacks
+        step = 1.0 if k % 3 else -0.4
+        c = Candle(t, px, px + max(step, 0) + 0.2, px + min(step, 0) - 0.2, px + step)
+        htf.update(c); ltf.update(c); vol.update(5, c)
+        px += step
+        t += dt.timedelta(minutes=15)
+    r = classify(htf, ltf, vol, 5)
+    assert r.direction == "up" and r.name.endswith("BULL")
+    assert "vix" in r.unavailable  # never invented
+
+
+def test_pdhl_breakout_signal():
+    from pie_trader.auto.backtest import run_backtest
+    from pie_trader.auto.candles import Candle as C
+
+    # day 1 sets PDH=102; day 2: observation candle, then an 80%-body close above PDH
+    cs = []
+    t = dt.datetime(2026, 11, 10, 9, 15)
+    for k in range(75):  # full day inside 98..102
+        cs.append(C(t, 100, min(102, 100.5 + (k % 3)), 99, 100))
+        t += dt.timedelta(minutes=5)
+    t = dt.datetime(2026, 11, 11, 9, 15)
+    cs.append(C(t, 100, 101, 99.8, 100.5)); t += dt.timedelta(minutes=5)   # observation
+    cs.append(C(t, 100.5, 101.5, 100.4, 101)); t += dt.timedelta(minutes=5)
+    cs.append(C(t, 101, 103.2, 100.9, 103.1)); t += dt.timedelta(minutes=5)  # breakout, big body
+    for k in range(40):
+        cs.append(C(t, 103.1, 103.4, 102.9, 103.2)); t += dt.timedelta(minutes=5)
+    cfg = AutoConfig(underlying="NIFTY", setups=["pdhl_break"], windows=[["09:15", "15:15"]],
+                     min_rr_to_target=0, atr_noise_floor=0, min_stop_pct=0, max_stop_pct=1,
+                     risk_per_trade=1e9, max_capital_frac=1e9)
+    r = run_backtest(cs, cfg, RuleSet(capital=1e12, max_loss_per_trade=1e12, max_lots=1))
+    assert any(tr.setup == "pdhl_break" and tr.direction == "up" for tr in r.engine.closed), r.engine.skips

@@ -24,6 +24,7 @@ class RuleSet:
     max_loss_per_trade: float = 1_500      # enforced live by Guard (needs prices)
     stop_loss_pct: float = 0.25            # of option premium
     max_lots: int = 2
+    min_lots: int = 1                      # reject the trade if this can't fit inside the risk budget
     max_trades_per_day: int = 6
     max_orders_per_day: int = 20
     max_consecutive_losses: int = 2
