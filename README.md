@@ -544,3 +544,31 @@ based on mathematics, data, and risk management.
 ```
 
 PIE Trader is designed to help traders build that discipline.
+
+---
+
+## Discipline engine, automated SMC research, and the risk-engine module
+
+In addition to the architecture above, this branch adds:
+
+- **Discipline engine** (`pie_trader/`): parses real broker trade/P&L
+  statements, computes FIFO P&L, finds behavioural trading mistakes in
+  rupees (expiry-day gambling, oversizing, revenge trading, averaging
+  down, overtrading, …), and replays a configurable rule set against your
+  own history to show what it would have saved. `pie analyse <file>`.
+- **Automated SMC/ICT research engine** (`pie_trader/auto/`): market
+  structure (BOS/CHoCH/liquidity/sweeps), order blocks, FVG,
+  premium/discount, a Market Direction Engine across six timeframes,
+  regime classification, a 5-index instrument master, portfolio-level
+  exposure control, and a backtester. `pie backtest` / `pie portfolio`.
+- **Java risk engine** (`java/pie-risk-engine/`): Java 25 + Spring Boot
+  4.1.2, Postgres-backed day ledger + audit trail, a Redis cross-replica
+  lock, idempotent closes — the deterministic risk-approval service.
+- **Infra** (`deploy/`): 4 Docker Compose profiles (dev/test/integration/
+  paper) and Kubernetes readiness manifests.
+- **QA** (`qa/`): requirements traceability matrix, defect register, and
+  an honest release-readiness verdict — see `qa/release-readiness.md`.
+  **Live trading remains disabled.**
+
+See `docs/ARCHITECTURE.md` for the full technical spec and stack decision,
+and each subfolder's own README for details.

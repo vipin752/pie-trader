@@ -1,0 +1,8 @@
+# Local development: a developer's own machine, verbose logging, named
+# volume kept across restarts so you don't lose your dev DB every time.
+services:
+  risk-engine:
+    environment:
+      SPRING_PROFILES_ACTIVE: dev
+    ports:
+      - "8080:8080"

@@ -174,3 +174,16 @@ allure-results/
 *.tar
 *.gz
 *.rar
+
+############################################
+# Added from feat/discipline-engine (personal broker data, Java/Maven build output)
+############################################
+.pytest_cache/
+# Personal broker statements and generated reports never go in the repo
+*.xlsx
+*.xls
+pie-report.html
+*.report.html
+# Java build output (java/pie-risk-engine)
+java/**/target/
+java/pie-risk-engine/.m2-cache/
