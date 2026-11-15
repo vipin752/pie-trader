@@ -41,6 +41,36 @@ g.on_close(symbol, realised_pnl, now)
 
 The Guard blocks or warns on: the daily loss limit, losses in a row, the trade and order count, the cooldown, expiry-day entries, the lot cap, averaging down, per-trade risk at the stop, and new short-dated option positions after the `flat_by` time.
 
+## Automated session engine
+
+`pie_trader/auto/` turns the rules into an automated option strategy on market structure:
+
+- **Structure:** swing highs/lows on closed candles, **BOS** (break of structure), **CHoCH** (change of character) and **liquidity** (untaken swings, equal highs/lows, previous-day high/low). Sweeps are wicks through a pool that close back inside.
+- **Setups:** `sweep_bos` — liquidity is swept, then price breaks structure the other way; `trend_bos` — a BOS in the direction of the 15-minute trend.
+- **Session filter:** entries only inside configured windows (default 09:30–11:30 and 13:15–14:45); everything managed by 15:15.
+- **Options:** ATM CE/PE on the nearest expiry that outlives the ride, so a position is **never held on its own expiry day**.
+- **Sizing:** lots from ₹ risk at the stop (`risk_per_trade`), capped by `max_lots` and capital. Every order still passes the **Guard**.
+- **Riding the trade:** half booked at +1R and the stop moves to breakeven; then the stop trails each new protected swing after every BOS in our favour. Exits on CHoCH against, on opposing liquidity being swept, or on the **max 3-session time stop**. Overnight only with ≥1R of cushion and the stop at breakeven or better.
+
+```bash
+pie backtest candles.csv --config rules.toml --report bot-report.html   # your own 5m underlying data
+pie backtest                                                            # synthetic demo, results meaningless
+pie auto webhook …  # see below
+```
+
+`candles.csv` columns: `datetime,open,high,low,close[,volume]` (5-minute bars of the underlying, IST).
+The backtest prices options with Black–Scholes as a stand-in — good for logic testing, not for live P&L claims. The bot's own fills can be fed back through the discipline report (`--report`).
+
+### TradingView / broker connection
+
+```bash
+pie webhook --secret <random> --port 8787
+```
+
+Point a TradingView alert at `http://<your-host>:8787/tv` with message
+`{"secret":"<random>","signal":"bos_up","price":{{close}},"time":"{{timenow}}"}`.
+TradingView only reports what happened on the chart; PIE still applies the session window, option selection, sizing and the Guard. Live broker adapters plug into `auto/broker.py::make_broker` and require `live=True` plus your API keys in environment variables — **paper mode is the default everywhere**.
+
 ## Layout
 
 ```
@@ -50,7 +80,9 @@ pie_trader/
   detectors.py behavioural findings with ₹ impact and the rule that fixes each
   rules.py     RuleSet (TOML), historical replay, per-rule impact, live Guard
   report.py    self-contained HTML report
-  cli.py       `pie analyse`
+  cli.py       `pie analyse` / `pie backtest` / `pie webhook`
+  auto/        automated engine: candles, structure (BOS/CHoCH/liquidity),
+               option selection, sizing, paper broker, backtest, TV webhook
 design/        PIE design system: tokens.json, pie.css, README
 tests/
 ```
@@ -64,6 +96,6 @@ Statements have no tick data. The replay can **skip** trades the rules forbid, *
 - [ ] More broker parsers: Zerodha tradebook, Upstox, Angel, Dhan
 - [ ] Contract-note parser for exact charges
 - [ ] Minute-candle replay so stop-loss and take-profit exits can be simulated
-- [ ] Broker API adapter with Guard in front of `place_order`, plus a kill switch
+- [ ] Live broker adapter (m.Stock / Angel One / Dhan / Zerodha / Upstox) with Guard in front of `place_order`, plus a kill switch
 - [ ] Pre-market plan: bias, levels and max risk written down before 09:15. The Guard rejects trades that aren't in the plan
 - [ ] Journal: each trade tagged with setup and emotion, then reviewed weekly

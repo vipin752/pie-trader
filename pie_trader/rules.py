@@ -187,7 +187,9 @@ class Guard:
         self.streak, self.last_loss_at = 0, {}
         self.positions: dict[str, list[float]] = {}  # symbol -> [qty, avg]
 
-    def check(self, symbol: str, side: str, qty: int, price: float, now: dt.datetime) -> Decision:
+    def check(self, symbol: str, side: str, qty: int, price: float, now: dt.datetime,
+              risk: float | None = None) -> Decision:
+        """risk: ₹ lost if the planned stop is hit. Defaults to stop_loss_pct of premium."""
         if now.date() != self.day:
             self._reset(now.date())
         r, why = self.r, []
@@ -217,11 +219,9 @@ class Guard:
                 worse = price < pos[1] if side == "Buy" else price > pos[1]
                 if worse:
                     why.append("Adding to a losing position (averaging down) is blocked.")
-            if is_option(symbol) and price * qty * r.stop_loss_pct > r.max_loss_per_trade:
-                why.append(
-                    f"Risk at a {r.stop_loss_pct:.0%} stop is ₹{price * qty * r.stop_loss_pct:,.0f}, "
-                    f"above the per-trade limit of ₹{r.max_loss_per_trade:,.0f}."
-                )
+            at_risk = risk if risk is not None else price * qty * r.stop_loss_pct
+            if is_option(symbol) and at_risk > r.max_loss_per_trade:
+                why.append(f"Risk at the stop is ₹{at_risk:,.0f}, above the per-trade limit of ₹{r.max_loss_per_trade:,.0f}.")
             hh, mm = map(int, r.flat_by.split(":"))
             exp = expiry(symbol)
             if is_option(symbol) and exp and (exp - now.date()).days < r.overnight_min_dte \
