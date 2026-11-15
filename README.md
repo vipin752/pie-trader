@@ -93,12 +93,29 @@ pie_trader/
 design/        PIE design system: tokens.json, pie.css, README
 tests/
 java/
-  pie-risk-engine/  Java 25 + Spring Boot 4.1.2 — first production-stack module,
-                    a working port of the deterministic Guard checks (own README,
-                    own tests: `cd java/pie-risk-engine && mvn test`)
+  pie-risk-engine/  Java 25 + Spring Boot 4.1.2 — deterministic risk-approval
+                    service, Postgres-backed day ledger + audit trail, a Redis
+                    cross-replica lock, idempotent closes (own README,
+                    `cd java/pie-risk-engine && mvn verify`)
+deploy/
+  compose/     4 Docker Compose profiles (dev/test/integration/paper), each
+               built and health-checked live against the risk engine
+  k8s/         Kubernetes readiness manifests (Deployment/Service/HPA/PDB/
+               NetworkPolicy/ConfigMap) — written, schema-checked, NOT applied
+               to a live cluster (see deploy/README.md)
+qa/            Requirements traceability matrix, defect register, test
+               execution / reconciliation / regression / release-readiness
+               reports (own README)
 ```
 
 The production backend is anchored on **Java 25 (LTS)** — see `docs/ARCHITECTURE.md` §13 for the full stack decision (Spring Boot 4.1.2, Kafka, Postgres, Redis, Next.js, where AI/ML and an LLM each fit and where they're deliberately kept out of the risk path) and `java/pie-risk-engine/README.md` for the first working module.
+
+**QA status**: `qa/release-readiness.md` is the honest verdict — not
+production-ready, live trading disabled, and exactly which acceptance
+conditions are met vs. not. `qa/defect-register.csv` lists 7 real defects
+found and fixed this session (3 of them P0: financial/risk-control
+correctness bugs caught by actually running the system against real
+Postgres/Redis, not by inspection).
 
 ## Limits of the replay
 

@@ -1,0 +1,23 @@
+# Automated / CI testing: ephemeral — a fresh database every run, no named
+# volume, so a leftover row from yesterday's run can never make a test pass
+# or fail for the wrong reason. Also used by `mvn verify`'s Testcontainers
+# tests indirectly (they start their own containers; this file is for
+# anyone running the stack manually to poke the same scenario by hand).
+services:
+  postgres:
+    environment:
+      POSTGRES_DB: pie_trader_test
+    volumes: !reset []             # drop the base file's named volume...
+    tmpfs:
+      - /var/lib/postgresql/data   # ...so data is never persisted — the point of the profile
+  risk-engine:
+    environment:
+      SPRING_PROFILES_ACTIVE: test
+      PIE_DB_NAME: pie_trader_test
+      # Container-internal Redis port is always 6379 regardless of which
+      # host port this profile publishes it under (see PIE_REDIS_PORT's
+      # 6380 default in application-test.yml, meant for running the jar
+      # bare on a dev machine against a locally-remapped port).
+      PIE_REDIS_PORT: "6379"
+    ports:
+      - "18080:8080"

@@ -2,6 +2,7 @@ package com.pietrader.risk;
 
 import org.springframework.boot.SpringApplication;
 import org.springframework.boot.autoconfigure.SpringBootApplication;
+import org.springframework.boot.context.properties.EnableConfigurationProperties;
 
 /**
  * Deterministic Risk Engine (spec §13, §14.10).
@@ -15,12 +16,15 @@ import org.springframework.boot.autoconfigure.SpringBootApplication;
  * deterministic half ({@code pie_trader.rules.Guard}) onto the stack the
  * production system is meant to run on.
  *
- * <p>State here is in-memory and single-instance — a stand-in for the
- * eventual Postgres/Redis-backed, multi-instance version. Treat this as a
- * proof that the Java 25 + Spring Boot toolchain decision actually builds
- * and passes tests, not as something to point real orders at yet.
+ * <p>Postgres holds the durable day ledger and the decision/close audit
+ * trail (Critical Safety #4/#8); a short-lived Redis lock keeps two
+ * replicas from deciding on the same correlated signal at once (#5/#7).
+ * What's still a stand-in: no Kafka wiring, no real broker reconciliation,
+ * no Position Management service — see docs/ARCHITECTURE.md and qa/ for the
+ * honest status of each.
  */
 @SpringBootApplication
+@EnableConfigurationProperties(RiskRules.class)
 public class PieRiskEngineApplication {
     public static void main(String[] args) {
         SpringApplication.run(PieRiskEngineApplication.class, args);

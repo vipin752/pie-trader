@@ -9,3 +9,4 @@ pie-report.html
 *.report.html
 # Java build output (java/pie-risk-engine)
 java/**/target/
+java/pie-risk-engine/.m2-cache/

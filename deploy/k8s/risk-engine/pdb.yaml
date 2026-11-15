@@ -1,0 +1,12 @@
+# Pod disruption control (spec Phase 3): a node drain or cluster upgrade
+# must never take the risk engine to zero replicas.
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: pie-risk-engine
+  namespace: pie-trader
+spec:
+  minAvailable: 1
+  selector:
+    matchLabels:
+      app: pie-risk-engine

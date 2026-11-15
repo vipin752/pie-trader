@@ -6,12 +6,39 @@ from collections import defaultdict
 from .models import Episode, Trade, is_option
 
 
+def dedupe_by_trade_id(trades: list[Trade]) -> tuple[list[Trade], int]:
+    """Drop exact repeats of the same broker trade_id, keeping the first.
+
+    Two overlapping exports, a re-run import, or a replayed fill event can
+    hand the same fill to the engine twice; without this, FIFO P&L silently
+    double-counts it (QA Suite 20 / LED-018: "duplicate fills must not
+    change the final ledger"). Trades with no id (blank, as some synthetic
+    or test rows have) are never treated as duplicates of each other.
+    Returns (deduped, number_dropped).
+    """
+    seen: set[str] = set()
+    out: list[Trade] = []
+    dropped = 0
+    for t in trades:
+        tid = str(t.trade_id or "").strip()
+        if tid and tid in seen:
+            dropped += 1
+            continue
+        if tid:
+            seen.add(tid)
+        out.append(t)
+    return out, dropped
+
+
 def build_episodes(trades: list[Trade]) -> list[Episode]:
     """Walk trades in time order; every flat→flat cycle on a contract is an Episode.
 
     Realised P&L is FIFO within the episode. A trade that flips the position
-    through zero closes one episode and opens the next.
+    through zero closes one episode and opens the next. Trades are
+    deduplicated by trade_id first (see dedupe_by_trade_id) so a repeated
+    fill event can never be counted twice.
     """
+    trades, _dropped = dedupe_by_trade_id(trades)
     lots: dict[str, list[list]] = defaultdict(list)  # [signed_qty, price, entry_idx]
     open_ep: dict[str, Episode] = {}
     done: list[Episode] = []

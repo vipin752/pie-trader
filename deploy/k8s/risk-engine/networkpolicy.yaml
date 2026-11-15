@@ -1,0 +1,40 @@
+# Default-deny plus explicit allows (spec Phase 3 "network policies"):
+# the risk engine only talks to Postgres/Redis/DNS outbound, and only
+# accepts inbound from other pods in this namespace (e.g. a future API
+# gateway or order-execution service) — never directly from the internet.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: pie-risk-engine
+  namespace: pie-trader
+spec:
+  podSelector:
+    matchLabels:
+      app: pie-risk-engine
+  policyTypes: ["Ingress", "Egress"]
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: pie-trader
+      ports:
+        - port: 8080
+  egress:
+    - to: []
+      ports:
+        - port: 53
+          protocol: UDP
+        - port: 53
+          protocol: TCP
+    - to:
+        - podSelector:
+            matchLabels:
+              app: pie-trader-postgres
+      ports:
+        - port: 5432
+    - to:
+        - podSelector:
+            matchLabels:
+              app: pie-trader-redis
+      ports:
+        - port: 6379

@@ -5,7 +5,7 @@ import pytest
 from pie_trader.detectors import detect
 from pie_trader.fmt import inr
 from pie_trader.models import Trade
-from pie_trader.pnl import build_episodes
+from pie_trader.pnl import build_episodes, dedupe_by_trade_id
 from pie_trader.rules import Guard, RuleSet, replay
 
 D = dt.date(2026, 11, 10)
@@ -105,3 +105,26 @@ def test_inr():
     assert inr(-168540) == "−₹1,68,540"
     assert inr(1035) == "+₹1,035"
     assert inr(-127216, compact=True) == "−₹1.27L"
+
+
+def test_duplicate_trade_id_does_not_double_count():
+    tr = [T("Buy", 65, 100, 0.1), T("Sell", 65, 60, 0.2)]
+    tr[0].trade_id = "5380839"
+    tr[1].trade_id = "5349148"
+    dup = T("Buy", 65, 100, 0.1)
+    dup.trade_id = "5380839"  # same broker trade id, e.g. a re-run import
+    eps = build_episodes(tr + [dup])
+    assert len(eps) == 1
+    assert eps[0].pnl == pytest.approx(65 * -40)  # unaffected by the duplicate
+
+
+def test_dedupe_by_trade_id_counts_drops_and_keeps_blank_ids():
+    tr = [T("Buy", 65, 100, 0.1), T("Sell", 65, 60, 0.2)]
+    tr[0].trade_id = "1"
+    tr[1].trade_id = "1"  # distinct trades that just happen to share no id — blank below instead
+    blanks = [T("Buy", 1, 1, 0.3), T("Buy", 1, 1, 0.4)]  # trade_id="" by default, never "duplicates" of each other
+    dup = T("Buy", 65, 100, 0.1)
+    dup.trade_id = "1"
+    out, dropped = dedupe_by_trade_id([tr[0], dup] + blanks)
+    assert dropped == 1
+    assert len(out) == 3

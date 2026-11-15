@@ -1,0 +1,23 @@
+# Local development — a single developer's machine, docker-compose's "dev" profile.
+spring:
+  datasource:
+    url: jdbc:postgresql://${PIE_DB_HOST:localhost}:5432/${PIE_DB_NAME:pie_trader}
+    username: ${PIE_DB_USER:pie}
+    password: ${PIE_DB_PASSWORD:pie_dev_only_change_me}
+  data:
+    redis:
+      host: ${PIE_REDIS_HOST:localhost}
+      port: 6379
+pie:
+  risk:
+    capital: 200000
+    max-daily-loss: 20000
+    max-loss-per-trade: 10000
+    max-lots: 10
+    min-lots: 6
+    max-consecutive-losses: 2
+    cooldown-minutes: 0
+    no-expiry-day-entries: true
+logging:
+  level:
+    com.pietrader: DEBUG
