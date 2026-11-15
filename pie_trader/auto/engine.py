@@ -23,7 +23,8 @@ class AutoConfig:
     underlying: str = "NIFTY"
     timeframe: int = 5                      # minutes, execution chart
     htf: int = 15                           # minutes, bias chart
-    windows: list = field(default_factory=lambda: [["09:30", "11:30"], ["13:15", "14:45"]])
+    windows: list = field(default_factory=lambda: [["09:20", "10:45"], ["11:30", "12:45"], ["13:45", "14:45"]])
+    max_trades_per_window: int = 0          # 0 = no per-session cap
     eod_exit: str = "15:15"
     setups: list = field(default_factory=lambda: ["sweep_bos", "trend_bos"])
     sweep_lookback: int = 12                # bars between sweep and BOS
@@ -41,6 +42,7 @@ class AutoConfig:
     trail: str = "structure"                # "structure": each new protected swing
                                             # "r_ratchet": +1R→breakeven, +2R→lock +1R, +3R→lock +2R, …
     exit_on_opposing_sweep: bool = True     # liquidity taken against us → done
+    allow_reverse_scalp: bool = True        # after a profitable CHoCH exit, the same CHoCH may be traded the other way
     max_hold_days: int = 3                  # sessions, entry day included
     overnight_min_r: float = 1.0            # hold overnight only with ≥1R open and stop ≥ breakeven
 
@@ -120,6 +122,8 @@ class Engine:
         self._pending: Optional[OptionContract] = None
         self.now = dt.datetime.min
         self.windows = [(_t(a), _t(b)) for a, b in cfg.windows]
+        self._win_trades: dict = {}
+        self._reverse_hint = None  # (direction, bar idx) set by a profitable CHoCH exit
 
     # paper broker reads this to price the option at the current spot
     def mark(self, symbol: str) -> float:
@@ -152,12 +156,20 @@ class Engine:
             self._htf_bar = Candle(key, c.open, c.high, c.low, c.close)
 
     # ── entries ──
-    def _in_window(self, t: dt.time):
-        return any(a <= t < b for a, b in self.windows)
+    def _window_of(self, t: dt.time):
+        for k, (a, b) in enumerate(self.windows):
+            if a <= t < b:
+                return k
+        return None
 
     def _maybe_enter(self, c: Candle, events: list[Event], i: int):
         cfg = self.cfg
-        if not self._in_window(self.now.time()):
+        win = self._window_of(self.now.time())
+        if win is None:
+            return
+        key = (self.now.date(), win)
+        if cfg.max_trades_per_window and self._win_trades.get(key, 0) >= cfg.max_trades_per_window:
+            self._skip("session window quota used")
             return
         for ev in events:
             if ev.kind not in ("BOS", "CHOCH"):
@@ -171,6 +183,10 @@ class Engine:
                     seg = self.ltf.candles[sw[-1].idx: i + 1]
                     stop = min(x.low for x in seg) if d == "up" else max(x.high for x in seg)
                     setup = "sweep_bos"
+            if not setup and cfg.allow_reverse_scalp and ev.kind == "CHOCH" and self._reverse_hint == (d, i):
+                ref = self.ltf.last_low(untaken=False) if d == "up" else self.ltf.last_high(untaken=False)
+                if ref:
+                    stop, setup = ref.price, "reverse_scalp"
             if not setup and "trend_bos" in cfg.setups and ev.kind == "BOS" and self.htf.trend == d:
                 ref = self.ltf.last_low(untaken=False) if d == "up" else self.ltf.last_high(untaken=False)
                 if ref:
@@ -193,15 +209,16 @@ class Engine:
             if target and abs(target - spot) / dist < cfg.min_rr_to_target:
                 self._skip("next liquidity too close")
                 continue
-            self._open(d, spot, stop, target, setup, i)
+            self._open(d, spot, stop, target, setup, i, win_key=key)
             return
 
-    def _open(self, d, spot, stop, target, setup, i):
+    def _open(self, d, spot, stop, target, setup, i, win_key=None):
         cfg, u = self.cfg, self.u
         con = choose_contract(u, spot, d, self.now, cfg.max_hold_days, cfg.itm_steps)
         entry = self.pricer(con, spot, self.now)
         stop_prem = self.pricer(con, stop, self.now)
-        lots = size_lots(entry, stop_prem, u.lot, cfg.risk_per_trade, self.rules.max_lots,
+        risk_budget = cfg.risk_per_trade * self.guard.risk_scale()
+        lots = size_lots(entry, stop_prem, u.lot, risk_budget, self.rules.max_lots,
                          self.rules.capital, cfg.max_capital_frac)
         if lots == 0:
             self._skip("risk too large for 1 lot")
@@ -214,6 +231,9 @@ class Engine:
         self._pending, self.mark_spot = con, spot
         f = self.broker.place_market(con.symbol, "Buy", qty, self.now)
         self.guard.on_fill(con.symbol, "Buy", qty, f.price, self.now)
+        if win_key is not None:
+            self._win_trades[win_key] = self._win_trades.get(win_key, 0) + 1
+        self._reverse_hint = None
         self.pos = Position(con, d, qty, f.price, spot, stop, stop, target, self.now, i, setup, {self.now.date()},
                             init_qty=qty, risk_inr=(f.price - stop_prem) * qty)
         self.pos.log.append(f"{self.now:%d %b %H:%M} {setup} entry {qty} @ {f.price} spot {spot:.1f} stop {stop:.1f}")
@@ -275,7 +295,10 @@ class Engine:
                         p.log.append(f"{self.now:%d %b %H:%M} trail → {new:.1f}")
             # 4. structure flips against us on close
             if ev.kind == "CHOCH" and ev.direction != p.direction:
+                was_green = p.realised + (self.pricer(p.contract, c.close, self.now) - p.entry_prem) * p.qty > 0
                 self._sell(p.qty, c.close, "CHoCH against")
+                if was_green and self.cfg.allow_reverse_scalp:
+                    self._reverse_hint = (ev.direction, i)
                 return
             # 5. opposing liquidity swept → the move is likely done
             if cfg.exit_on_opposing_sweep and ev.kind == "SWEEP" and ev.direction != p.direction and p.r_at(c.close) > 0:

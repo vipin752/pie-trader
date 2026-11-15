@@ -15,7 +15,10 @@ SESSION_MINUTES = 375  # NSE 09:15–15:30
 class RuleSet:
     capital: float = 200_000
     max_daily_loss: float = 4_000          # ~2% of capital
-    daily_profit_target: float = 0         # ₹; >0 → stop trading for the day once reached
+    daily_profit_target: float = 0         # ₹; >0 → minimum day goal: once reached, risk is
+                                           # halved and the banked profit is protected, trading continues
+    after_target_risk_frac: float = 0.5    # risk per trade is scaled by this after the target is hit
+    day_giveback_frac: float = 0.5         # after target: stop if realised falls to this × day's peak
     stop_after_first_loss: bool = False    # one booked loss → done for the day
     max_weekly_loss: float = 10_000
     max_loss_per_trade: float = 1_500      # enforced live by Guard (needs prices)
@@ -96,6 +99,7 @@ def replay(episodes: list[Episode], rules: RuleSet) -> ReplayResult:
         d_orig[e.end_date] += e.pnl
         if e.start_date != day:
             day, run, n, streak, stopped, last_loss = e.start_date, 0.0, 0, 0, None, {}
+            peak = 0.0
         wk = e.start_date.isocalendar()[:2]
         if wk != week:
             week, week_pnl = wk, 0.0
@@ -127,6 +131,9 @@ def replay(episodes: list[Episode], rules: RuleSet) -> ReplayResult:
         if qty > cap:
             pnl *= cap / qty
             why.append(f"size capped {qty // lot}→{rules.max_lots} lots")
+        if rules.daily_profit_target > 0 and peak >= rules.daily_profit_target:
+            pnl *= rules.after_target_risk_frac
+            why.append("half size after daily target")
         if why:
             trimmed.append((e, e.pnl, pnl, ", ".join(why)))
 
@@ -140,12 +147,14 @@ def replay(episodes: list[Episode], rules: RuleSet) -> ReplayResult:
             last_loss[e.underlying] = e.end_seq
         else:
             streak = 0
+        peak = max(peak, run)
         if run <= -rules.max_daily_loss:
             stopped = "Daily loss limit hit"
         elif rules.stop_after_first_loss and pnl < 0:
             stopped = "First loss booked — done for the day"
-        elif rules.daily_profit_target > 0 and run >= rules.daily_profit_target:
-            stopped = "Daily profit target reached"
+        elif rules.daily_profit_target > 0 and peak >= rules.daily_profit_target \
+                and run <= peak * rules.day_giveback_frac:
+            stopped = "Gave back half the banked profit after target"
         elif streak >= rules.max_consecutive_losses:
             stopped = "Consecutive-loss stop"
 
@@ -190,6 +199,7 @@ class Guard:
 
     def _reset(self, day):
         self.day, self.realised, self.trades, self.orders = day, 0.0, 0, 0
+        self.peak_realised = 0.0
         self.streak, self.losses_today, self.last_loss_at = 0, 0, {}
         self.positions: dict[str, list[float]] = {}  # symbol -> [qty, avg]
 
@@ -207,8 +217,11 @@ class Guard:
                 why.append(f"Daily loss limit reached (₹{self.realised:,.0f}). Done for today.")
             if r.stop_after_first_loss and self.losses_today >= 1:
                 why.append("One loss already booked today. Done for today.")
-            if r.daily_profit_target > 0 and self.realised >= r.daily_profit_target:
-                why.append(f"Daily target reached (₹{self.realised:,.0f}). Protect it — done for today.")
+            if self.target_hit and self.realised <= self.peak_realised * r.day_giveback_frac:
+                why.append(
+                    f"Gave back to ₹{self.realised:,.0f} from the day's peak ₹{self.peak_realised:,.0f} "
+                    f"after the target. Protect the rest — done for today."
+                )
             if self.streak >= r.max_consecutive_losses:
                 why.append(f"{self.streak} losses in a row. Done for today.")
             if pos is None and self.trades >= r.max_trades_per_day:
@@ -256,10 +269,20 @@ class Guard:
             if pos[0] == 0:
                 del self.positions[symbol]
 
+    @property
+    def target_hit(self) -> bool:
+        return self.r.daily_profit_target > 0 and self.peak_realised >= self.r.daily_profit_target
+
+    def risk_scale(self) -> float:
+        """Multiply the per-trade ₹ risk by this: 1.0 normally, halved once the
+        daily target has been banked (smaller lots, same hunting)."""
+        return self.r.after_target_risk_frac if self.target_hit else 1.0
+
     def on_close(self, symbol: str, pnl: float, now: dt.datetime):
         if now.date() != self.day:
             self._reset(now.date())
         self.realised += pnl
+        self.peak_realised = max(self.peak_realised, self.realised)
         if pnl < 0:
             self.streak += 1
             self.losses_today += 1
@@ -270,13 +293,13 @@ class Guard:
 
 # Values that switch a rule off, for measuring each rule on its own.
 _OFF = {
-    "max_daily_loss": 1e12, "daily_profit_target": 0.0, "stop_after_first_loss": False, "max_weekly_loss": 1e12, "max_lots": 10**6, "max_trades_per_day": 10**6,
+    "max_daily_loss": 1e12, "daily_profit_target": 0.0, "stop_after_first_loss": False, "day_giveback_frac": 0.0, "max_weekly_loss": 1e12, "max_lots": 10**6, "max_trades_per_day": 10**6,
     "max_consecutive_losses": 10**6, "cooldown_minutes": 0, "no_expiry_day_entries": False,
     "no_averaging_down": False,
 }
 RULE_LABELS = {
     "stop_after_first_loss": "Stop after the first loss",
-    "daily_profit_target": "Stop at the daily profit target",
+    "daily_profit_target": "Half size + giveback floor after target",
     "no_expiry_day_entries": "No entries on expiry day",
     "max_lots": "Max lots per position",
     "no_averaging_down": "No averaging down",

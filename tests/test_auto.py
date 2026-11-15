@@ -126,8 +126,13 @@ def test_guard_first_loss_and_daily_target():
 
     g2 = Guard(RuleSet(daily_profit_target=20000))
     g2.on_close("NIFTY 24 NOV 2026 25000 CE", 21000, t0)
-    d2 = g2.check("NIFTY 24 NOV 2026 25100 CE", "Buy", 65, 50, t0 + dt.timedelta(minutes=30))
-    assert not d2 and "target reached" in d2.reasons[0]
+    # target is a MINIMUM: trading continues, at half risk
+    assert g2.check("NIFTY 24 NOV 2026 25100 CE", "Buy", 65, 50, t0 + dt.timedelta(minutes=30))
+    assert g2.risk_scale() == 0.5
+    # but giving back half the banked peak ends the day
+    g2.on_close("NIFTY 24 NOV 2026 25100 CE", -11000, t0 + dt.timedelta(hours=1))
+    d2 = g2.check("NIFTY 24 NOV 2026 25200 CE", "Buy", 65, 50, t0 + dt.timedelta(hours=2))
+    assert not d2 and "Gave back" in d2.reasons[0]
     # next day both reset
     assert g.check("NIFTY 24 NOV 2026 25100 CE", "Buy", 65, 50, t0 + dt.timedelta(days=1))
     assert g2.check("NIFTY 24 NOV 2026 25100 CE", "Buy", 65, 50, t0 + dt.timedelta(days=1))
