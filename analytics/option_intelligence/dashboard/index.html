@@ -1,0 +1,188 @@
+<!DOCTYPE html>
+<html>
+
+<head>
+
+<title>PIE Trader Dashboard</title>
+
+<style>
+
+body{
+font-family:Arial;
+background:#0f1116;
+color:white;
+margin:20px;
+}
+
+h1{
+color:#00ffcc;
+}
+
+.panel{
+border:1px solid #333;
+padding:15px;
+margin-bottom:15px;
+border-radius:6px;
+background:#161a23;
+}
+
+.value{
+color:#00ffcc;
+font-weight:bold;
+}
+
+</style>
+
+</head>
+
+<body>
+
+<h1>PIE Trader – Market Intelligence</h1>
+
+<div class="panel">
+
+<h2>Market Decision</h2>
+
+<div id="state">Loading...</div>
+<div id="bias"></div>
+<div id="strategy"></div>
+
+</div>
+
+
+<div class="panel">
+
+<h2>Market Info</h2>
+
+<div id="spot"></div>
+<div id="atm"></div>
+<div id="expiry"></div>
+
+</div>
+
+
+<div class="panel">
+
+<h2>Gamma Levels</h2>
+
+<div id="gamma_flip"></div>
+<div id="call_wall"></div>
+<div id="put_wall"></div>
+
+</div>
+
+
+<div class="panel">
+
+<h2>Liquidity</h2>
+
+<div id="support"></div>
+<div id="resistance"></div>
+
+</div>
+
+
+<div class="panel">
+
+<h2>Dealer Model</h2>
+
+<div id="dealer_regime"></div>
+<div id="dealer_vol"></div>
+
+</div>
+
+
+<div class="panel">
+
+<h2>Market Regime</h2>
+
+<div id="regime"></div>
+<div id="vol_state"></div>
+
+</div>
+
+
+<div class="panel">
+
+<h2>Options Flow</h2>
+
+<pre id="flow"></pre>
+
+</div>
+
+
+
+<script>
+
+async function loadData(){
+
+try{
+
+const res = await fetch("http://127.0.0.1:8000/option-summary?symbol=NIFTY")
+
+const data = await res.json()
+
+console.log(data)
+
+document.getElementById("spot").innerHTML =
+"Spot: <span class='value'>" + data.spot + "</span>"
+
+document.getElementById("atm").innerHTML =
+"ATM: <span class='value'>" + data.atm + "</span>"
+
+document.getElementById("expiry").innerHTML =
+"Expiry: <span class='value'>" + data.expiry.nearest_expiry + "</span>"
+
+
+document.getElementById("gamma_flip").innerHTML =
+"Gamma Flip: <span class='value'>" + data.gamma.gamma_flip + "</span>"
+
+document.getElementById("call_wall").innerHTML =
+"Call Wall: <span class='value'>" + data.gamma.call_gamma_wall + "</span>"
+
+document.getElementById("put_wall").innerHTML =
+"Put Wall: <span class='value'>" + data.gamma.put_gamma_wall + "</span>"
+
+
+document.getElementById("support").innerHTML =
+"Support: <span class='value'>" + data.liquidity.support + "</span>"
+
+document.getElementById("resistance").innerHTML =
+"Resistance: <span class='value'>" + data.liquidity.resistance + "</span>"
+
+
+document.getElementById("dealer_regime").innerHTML =
+"Dealer Regime: <span class='value'>" + data.dealer_hedging.dealer_regime + "</span>"
+
+document.getElementById("dealer_vol").innerHTML =
+"Volatility State: <span class='value'>" + data.dealer_hedging.volatility_state + "</span>"
+
+
+document.getElementById("regime").innerHTML =
+"Market Regime: <span class='value'>" + data.market_regime.market_regime + "</span>"
+
+document.getElementById("vol_state").innerHTML =
+"Volatility: <span class='value'>" + data.market_regime.volatility_state + "</span>"
+
+
+document.getElementById("flow").textContent =
+JSON.stringify(data.options_flow, null, 2)
+
+}
+catch(e){
+
+console.error(e)
+
+}
+
+}
+
+loadData()
+
+setInterval(loadData,15000)
+
+</script>
+
+</body>
+
+</html>

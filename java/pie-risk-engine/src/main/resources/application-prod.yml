@@ -1,0 +1,30 @@
+# Production. Every secret comes from the environment (K8s Secret / external
+# secret manager) — ${VAR:?required} fails fast at startup instead of
+# silently running with a placeholder credential.
+spring:
+  datasource:
+    url: jdbc:postgresql://${PIE_DB_HOST:?required}:5432/${PIE_DB_NAME:?required}
+    username: ${PIE_DB_USER:?required}
+    password: ${PIE_DB_PASSWORD:?required}
+    hikari:
+      maximum-pool-size: 10
+  data:
+    redis:
+      host: ${PIE_REDIS_HOST:?required}
+      port: 6379
+      password: ${PIE_REDIS_PASSWORD:}
+pie:
+  risk:
+    capital: ${PIE_CAPITAL:200000}
+    max-daily-loss: ${PIE_MAX_DAILY_LOSS:20000}
+    max-loss-per-trade: ${PIE_MAX_LOSS_PER_TRADE:10000}
+    max-lots: ${PIE_MAX_LOTS:10}
+    min-lots: ${PIE_MIN_LOTS:6}
+    max-consecutive-losses: ${PIE_MAX_CONSECUTIVE_LOSSES:2}
+    cooldown-minutes: ${PIE_COOLDOWN_MINUTES:15}
+    no-expiry-day-entries: true
+logging:
+  level:
+    com.pietrader: INFO
+  pattern:
+    console: '{"ts":"%d{ISO8601}","level":"%level","trace":"%X{traceId:-}","logger":"%logger{36}","msg":"%msg"}%n'

@@ -1,0 +1,19 @@
+# Paper trading: same risk numbers as production (see application-paper.yml)
+# so a validated paper session actually proves the rules that would run
+# live. Named volumes persist — a paper session's ledger should survive a
+# restart exactly like a real one would. No port published on Postgres/Redis:
+# only risk-engine is reachable from outside the compose network.
+services:
+  postgres:
+    environment:
+      POSTGRES_DB: pie_trader_paper
+    ports: []
+  redis:
+    ports: []
+  risk-engine:
+    environment:
+      SPRING_PROFILES_ACTIVE: paper
+      PIE_DB_NAME: pie_trader_paper
+    ports:
+      - "8080:8080"
+    restart: unless-stopped

@@ -1,0 +1,20 @@
+# Integration testing: like "test" but keeps ports open and data alive for
+# one CI run's duration so a separate API/contract-test stage (e.g. k6,
+# Postman/Newman, a Python pytest job hitting the real HTTP API) can run
+# against it before teardown.
+services:
+  postgres:
+    environment:
+      POSTGRES_DB: pie_trader_test
+    ports:
+      - "15432:5432"
+  redis:
+    ports:
+      - "16379:6379"
+  risk-engine:
+    environment:
+      SPRING_PROFILES_ACTIVE: test
+      PIE_DB_NAME: pie_trader_test
+      PIE_REDIS_PORT: "6379"   # container-internal port; see docker-compose.test.yml's comment
+    ports:
+      - "28080:8080"

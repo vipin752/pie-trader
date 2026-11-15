@@ -1,0 +1,24 @@
+# Autoscaling "where appropriate" (spec Phase 3) — this service's load is
+# driven by trading decisions per second, which for one portfolio is tiny;
+# this exists so the capability is proven, not because real load needs it
+# yet. minReplicas stays at 2 regardless, for the availability reason noted
+# on the Deployment, not for scale.
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: pie-risk-engine
+  namespace: pie-trader
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: pie-risk-engine
+  minReplicas: 2
+  maxReplicas: 6
+  metrics:
+    - type: Resource
+      resource:
+        name: cpu
+        target:
+          type: Utilization
+          averageUtilization: 70

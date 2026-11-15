@@ -1,0 +1,56 @@
+# Base services shared by every profile. Each profile file below layers on
+# top of this with `docker compose -f docker-compose.yml -f docker-compose.<profile>.yml`.
+# Secrets are NEVER hardcoded here — every password comes from an env var
+# with no default in paper/prod, so a missing .env fails loudly instead of
+# silently running with a placeholder credential.
+name: pie-trader
+
+services:
+  postgres:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_DB: ${PIE_DB_NAME:-pie_trader}
+      POSTGRES_USER: ${PIE_DB_USER:-pie}
+      POSTGRES_PASSWORD: ${PIE_DB_PASSWORD:?Set PIE_DB_PASSWORD in your .env — never commit a real one}
+    volumes:
+      - pg_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${PIE_DB_USER:-pie} -d ${PIE_DB_NAME:-pie_trader}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  redis:
+    image: redis:7-alpine
+    command: ["redis-server", "--save", "", "--appendonly", "no"]
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  risk-engine:
+    build:
+      context: ../../java/pie-risk-engine
+    environment:
+      SPRING_PROFILES_ACTIVE: ${PIE_PROFILE:-dev}
+      PIE_DB_HOST: postgres
+      PIE_DB_NAME: ${PIE_DB_NAME:-pie_trader}
+      PIE_DB_USER: ${PIE_DB_USER:-pie}
+      PIE_DB_PASSWORD: ${PIE_DB_PASSWORD:?Set PIE_DB_PASSWORD in your .env}
+      PIE_REDIS_HOST: redis
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    ports:
+      - "${PIE_RISK_ENGINE_PORT:-8080}:8080"
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:8080/actuator/health"]
+      interval: 5s
+      timeout: 5s
+      retries: 15
+
+volumes:
+  pg_data:
