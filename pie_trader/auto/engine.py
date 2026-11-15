@@ -10,6 +10,8 @@ from ..rules import Guard, RuleSet
 from .broker import Broker
 from .candles import Candle
 from .options import OptionContract, Underlying, choose_contract, size_lots
+from .regime import classify
+from .smc import SMC
 from .structure import Event, Structure
 from .volatility import VolatilityEngine
 
@@ -27,9 +29,12 @@ class AutoConfig:
     windows: list = field(default_factory=lambda: [["09:20", "10:45"], ["11:30", "12:45"], ["13:45", "14:45"]])
     max_trades_per_window: int = 0          # 0 = no per-session cap
     eod_exit: str = "15:15"
-    setups: list = field(default_factory=lambda: ["sweep_bos", "trend_bos", "pdhl_break"])
+    setups: list = field(default_factory=lambda: ["sweep_bos", "trend_bos", "pdhl_break", "ob_mitigation", "or_fib"])
+    pd_filter: bool = True                  # SMC: longs only in discount, shorts only in premium of the dealing range
+    ote_filter: bool = False                # stricter: entries only inside the 62–79% OTE pocket
+    or_fib_min_body: float = 20.0           # min opening 15m candle body (index points) for the fib setup
     pdhl_body_frac: float = 0.8             # breakout candle must close with ≥80% body beyond PDH/PDL
-    sma_filter: bool = False                # longs only above / shorts only below the 26-SMA
+    sma_filter: bool = False                # research-only; spec says no mandatory SMA rules
     sma_period: int = 26
     stop_and_reverse: bool = True           # failed PDH/PDL breakout whose stop-candle closes strongly opposite → reverse armed
     atr_noise_floor: float = 0.8            # stop distance must exceed this × exec-TF ATR
@@ -82,6 +87,8 @@ class Position:
     sessions: set = field(default_factory=set)
     init_qty: int = 0
     risk_inr: float = 0.0
+    regime: str = "n/a"
+    vol_state: str = "n/a"
     partial_done: bool = False
     realised: float = 0.0
     log: list = field(default_factory=list)
@@ -111,6 +118,8 @@ class ClosedTrade:
     r_multiple: float
     exit_reason: str
     sessions: int
+    regime: str = "n/a"
+    vol_state: str = "n/a"
 
 
 class Engine:
@@ -131,6 +140,8 @@ class Engine:
         self._win_trades: dict = {}
         self._reverse_hint = None  # (direction, bar idx) set by a profitable CHoCH exit
         self.vol = VolatilityEngine()
+        self.smc = SMC(self.ltf)
+        self._or: dict = {}        # opening 15m range per day: open/close/body fib levels
         self._sma: list = []       # rolling closes for the SMA filter
         self._sar_hint = None      # (direction, bar idx) armed by a failed-breakout stop-out
         self._day = None
@@ -156,6 +167,8 @@ class Engine:
         if len(self._sma) > self.cfg.sma_period:
             self._sma.pop(0)
         events = self.ltf.update(c)
+        self.smc.update(c, events)
+        self._track_opening_range(c)
         self._feed_htf(c)
         i = len(self.ltf.candles) - 1
         if self.pos:
@@ -175,6 +188,36 @@ class Engine:
             self._htf_bar = Candle(key, c.open, c.high, c.low, c.close)
 
     # ── entries ──
+    def _track_opening_range(self, c: Candle):
+        d = c.ts.date()
+        if c.ts.time() < dt.time(9, 30):
+            o = self._or.setdefault(d, {"open": c.open, "close": c.close, "done": False})
+            o["close"] = c.close
+        elif d in self._or and not self._or[d]["done"]:
+            o = self._or[d]
+            o["done"] = True
+            body = abs(o["close"] - o["open"])
+            if body >= self.cfg.or_fib_min_body:
+                lo, hi = min(o["open"], o["close"]), max(o["open"], o["close"])
+                o["levels"] = {r: lo + r * (hi - lo) for r in (0.382, 0.618, 1.382, 1.618)}
+                o["levels"].update({-r + 1: hi - r * (hi - lo) for r in (1.382, 1.618)})  # extensions below
+
+    def _or_fib_signal(self, c: Candle):
+        """Fib blast: a dominant-body close beyond the 138.2% extension of the
+        opening 15m body, in that direction."""
+        o = self._or.get(c.ts.date())
+        if not o or not o.get("done") or "levels" not in o:
+            return None
+        rng = c.high - c.low
+        if rng <= 0 or abs(c.close - c.open) / rng < 0.6:
+            return None
+        up_lvl, dn_lvl = o["levels"][1.382], o["levels"][1 - 1.382]
+        if c.open <= up_lvl < c.close:
+            return "up", c.low
+        if c.open >= dn_lvl > c.close:
+            return "down", c.high
+        return None
+
     def _sma_ok(self, d: str, price: float) -> bool:
         if not self.cfg.sma_filter or len(self._sma) < self.cfg.sma_period:
             return True
@@ -217,13 +260,32 @@ class Engine:
             sig = self._pdhl_signal(c)
             if sig:
                 candidates.append(("PDHL", sig[0]))
-        if self._sar_hint is not None and self._sar_hint[1] == i:
+        if "or_fib" in cfg.setups:
+            sig = self._or_fib_signal(c)
+            if sig:
+                candidates.append(("FIB", sig[0]))
+        if "ob_mitigation" in cfg.setups and self.htf.trend in ("up", "down"):
+            d = self.htf.trend
+            z = self.smc.fresh_zone_at(c.low if d == "up" else c.high, d)
+            confirm = (c.close > c.open) if d == "up" else (c.close < c.open)
+            if z and confirm:
+                candidates.append(("OBZ", d))
+        if self._sar_hint is not None and self._sar_hint[1] == i and any(
+                e.kind in ("BOS", "CHOCH") and e.direction == self._sar_hint[0] for e in events):
+            # spec §4D: a reverse trade needs its own validated structure event
             candidates.append(("SAR", self._sar_hint[0]))
         for kind, d in candidates:
             setup, stop = None, None
             ev = next((e for e in events if e.kind == kind and e.direction == d), None)
             if kind == "PDHL":
                 setup, stop = "pdhl_break", self._pdhl_signal(c)[1]
+            elif kind == "FIB":
+                setup, stop = "or_fib", self._or_fib_signal(c)[1]
+            elif kind == "OBZ":
+                z = self.smc.fresh_zone_at(c.low if d == "up" else c.high, d)
+                if z:
+                    setup = "ob_mitigation"
+                    stop = z.bottom if d == "up" else z.top
             elif kind == "SAR":
                 ref = self.ltf.last_low(untaken=False) if d == "up" else self.ltf.last_high(untaken=False)
                 if ref:
@@ -247,6 +309,17 @@ class Engine:
             if not setup:
                 self._skip("BOS without sweep or HTF alignment")
                 continue
+            # SMC premium/discount discipline applies to retracement entries;
+            # breakout setups trade through the extreme by definition.
+            if setup in ("ob_mitigation", "reverse_scalp"):
+                if cfg.pd_filter:
+                    disc = self.smc.in_discount(c.close)
+                    if disc is not None and ((d == "up" and not disc) or (d == "down" and disc)):
+                        self._skip("SMC: long in premium / short in discount")
+                        continue
+                if cfg.ote_filter and self.smc.in_ote(c.close, d) is False:
+                    self._skip("outside the OTE pocket")
+                    continue
             if not self._sma_ok(d, c.close):
                 self._skip(f"against the {cfg.sma_period}-SMA")
                 continue
@@ -294,8 +367,11 @@ class Engine:
         if win_key is not None:
             self._win_trades[win_key] = self._win_trades.get(win_key, 0) + 1
         self._reverse_hint = None
+        reg = classify(self.htf, self.ltf, self.vol, cfg.timeframe)
         self.pos = Position(con, d, qty, f.price, spot, stop, stop, target, self.now, i, setup, {self.now.date()},
                             init_qty=qty, risk_inr=(f.price - stop_prem) * qty)
+        self.pos.log.insert(0, f"regime={reg.name} vol={reg.vol_state} | " + "; ".join(reg.evidence))
+        self.pos.regime, self.pos.vol_state = reg.name, reg.vol_state
         self.pos.log.append(f"{self.now:%d %b %H:%M} {setup} entry {qty} @ {f.price} spot {spot:.1f} stop {stop:.1f}")
 
     # ── management ──
@@ -312,7 +388,8 @@ class Engine:
             init_risk_inr = max(1.0, p.risk_inr)
             self.closed.append(ClosedTrade(p.contract.symbol, p.setup, p.direction, p.opened, self.now,
                                            p.init_qty, p.entry_prem, p.realised,
-                                           p.realised / init_risk_inr, reason, len(p.sessions)))
+                                           p.realised / init_risk_inr, reason, len(p.sessions),
+                                           p.regime, p.vol_state))
             self.pos = None
 
     def _manage(self, c: Candle, events: list[Event], i: int):

@@ -194,3 +194,47 @@ def test_pdhl_breakout_signal():
                      risk_per_trade=1e9, max_capital_frac=1e9)
     r = run_backtest(cs, cfg, RuleSet(capital=1e12, max_loss_per_trade=1e12, max_lots=1))
     assert any(tr.setup == "pdhl_break" and tr.direction == "up" for tr in r.engine.closed), r.engine.skips
+
+
+def _c(t, o, h, l, cl):
+    return Candle(t, o, h, l, cl)
+
+
+def test_smc_fvg_and_order_block():
+    from pie_trader.auto.smc import SMC
+    from pie_trader.auto.structure import Structure
+
+    st = Structure(1, 1)
+    smc = SMC(st)
+    t = dt.datetime(2026, 11, 16, 9, 15)
+    seq = [
+        (100, 101, 99.5, 100.5), (100.5, 101.2, 100, 100.2), (100.2, 100.8, 99.8, 100),  # down close @2
+        (100, 103, 100, 102.9),          # impulse; FVG vs bar 1? bar1.high 101.2 < ?  
+        (103, 105.5, 102.9, 105.4),      # gap: bar3 low 100 vs bar1... check 3-candle: cs[2].high=100.8 < low=102.9 → bullish FVG
+    ]
+    for k, (o, h, l, cl) in enumerate(seq):
+        evs = st.update(_c(t, o, h, l, cl))
+        smc.update(_c(t, o, h, l, cl), evs)
+        t += dt.timedelta(minutes=5)
+    assert any(z.direction == "up" and not z.mitigated for z in smc.fvgs), smc.fvgs
+    # a bullish OB forms once a BOS/CHoCH up fires (last down-close candle)
+    for o, h, l, cl in [(105.4, 105.6, 104, 104.2), (104.2, 104.5, 103.5, 103.8), (103.8, 106.5, 103.7, 106.4)]:
+        evs = st.update(_c(t, o, h, l, cl))
+        smc.update(_c(t, o, h, l, cl), evs)
+        t += dt.timedelta(minutes=5)
+    assert any(z.kind == "OB" and z.direction == "up" for z in smc.obs)
+
+
+def test_smc_premium_discount_and_ote():
+    from pie_trader.auto.smc import SMC
+    from pie_trader.auto.structure import Structure, Swing
+
+    st = Structure(1, 1)
+    smc = SMC(st)
+    st.highs.append(Swing(0, 200.0, "H"))
+    st.lows.append(Swing(1, 100.0, "L"))
+    assert smc.in_discount(120) is True
+    assert smc.in_discount(180) is False
+    assert smc.in_ote(130, "up") is True      # 62–79% pocket: 121..138
+    assert smc.in_ote(160, "up") is False
+    assert smc.in_ote(170, "down") is True

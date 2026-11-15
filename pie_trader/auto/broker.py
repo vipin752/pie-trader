@@ -67,6 +67,10 @@ def make_broker(name: str, price_fn, live: bool = False, **creds):
     variables, never from this repo. live=True is required to send real orders."""
     if name == "paper":
         return PaperBroker(price_fn)
+    if name in ("angel", "angelone"):
+        from .brokers.angelone import AngelOneBroker
+
+        return AngelOneBroker(live=live)
     if not live:
         raise LiveBrokerNotConfigured("Refusing to create a real broker without live=True")
     raise LiveBrokerNotConfigured(f"No adapter for '{name}' yet. Tell PIE which broker you use.")

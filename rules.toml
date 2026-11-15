@@ -3,22 +3,20 @@
 
 [risk]
 capital            = 200000   # trading capital, ₹
-max_daily_loss     = 4000     # hit it → done for the day
+max_daily_loss     = 20000    # 10% hard floor for the day (spec §7 risk basis)
 daily_profit_target = 20000   # 10% of capital — a MINIMUM, not a stop: after this,
                               # keep hunting at half size and protect the bank
 after_target_risk_frac = 0.5  # risk per trade after the target (20k banked → 10k→ risk halved)
 day_giveback_frac  = 0.5      # after target, stop if the day falls to half its peak
-stop_after_first_loss = true  # one booked loss → no more trades that day
+stop_after_first_loss = false # spec §7 supersedes: two losing trades end the day instead
 max_weekly_loss    = 10000    # hit it → done until Monday
-max_loss_per_trade = 1500     # entry × qty × stop_loss_pct must fit inside this
+max_loss_per_trade = 10000    # 5% of capital per trade (spec §7)
 stop_loss_pct      = 0.25     # stop at 25% of option premium
-max_lots           = 2        # per position, including adds
-min_lots           = 1        # reject the trade if this can't fit the risk budget
-                              # (spec §12 says 6 — that needs max_lots ≥ 6 and a bigger
-                              # risk budget; raise both together, deliberately)
+max_lots           = 10       # per position, including adds
+min_lots           = 6        # spec §7: reject the trade if 6 lots can't fit the risk budget
 
 [behaviour]
-max_trades_per_day     = 6    # new positions
+max_trades_per_day     = 3    # spec §7
 max_orders_per_day     = 20
 max_consecutive_losses = 2    # two losers in a row → stop
 cooldown_minutes       = 15   # after any loss, same underlying
@@ -41,10 +39,12 @@ htf               = 15          # bias chart, minutes
 windows           = [["09:20","10:45"],["11:30","12:45"],["13:45","14:45"]]  # the three sessions
 max_trades_per_window = 1     # one good trade per session
 eod_exit          = "15:15"
-setups            = ["sweep_bos","trend_bos","pdhl_break"]
-sma_filter        = true        # longs above / shorts below the 26-SMA only
+setups            = ["sweep_bos","trend_bos","pdhl_break","ob_mitigation","or_fib"]
+pd_filter         = true        # SMC: retracement longs only in discount, shorts only in premium
+ote_filter        = false       # stricter 62–79% OTE pocket (research)
+sma_filter        = false       # spec §4C: no mandatory SMA rules; keep as research toggle
 stop_and_reverse  = true        # failed PDH/PDL breakout, strong opposite close → reverse armed
-risk_per_trade    = 1500        # ₹ at the stop; lots are sized from this
+risk_per_trade    = 10000       # 5% of ₹2L at the stop; lots are sized from this (spec §7)
 max_hold_days     = 3           # ride at most 3 sessions, entry day included
 overnight_min_r   = 1.0         # hold overnight only if ≥1R ahead with stop at breakeven
 min_rr_to_target  = 2.0         # take only trades with ≥1:2 room to the next liquidity

@@ -30,6 +30,7 @@ def main(argv=None):
     b.add_argument("--config", default=None, help="TOML with an [auto] section")
     b.add_argument("--rules", default=None)
     b.add_argument("--report", default=None, help="Also run the discipline report on the bot's fills")
+    b.add_argument("--journal", default=None, help="Write a JSON journal: one record per trade with regime/vol context")
 
     w = sub.add_parser("webhook", help="TradingView webhook listener (signals only; paper unless a live broker is configured)")
     w.add_argument("--secret", required=True)
@@ -93,6 +94,13 @@ def _backtest(args):
     for t in res.engine.closed:
         print(f"  {t.opened:%d %b %H:%M} {t.setup:9} {t.symbol:32} {t.exit_reason:34} "
               f"{t.sessions}d {inr(t.pnl):>12} {t.r_multiple:+.2f}R")
+    if args.journal:
+        import dataclasses
+        import json as _json
+
+        with open(args.journal, "w") as fh:
+            _json.dump([dataclasses.asdict(t) for t in res.engine.closed], fh, indent=2, default=str)
+        print("Journal:", args.journal)
     if args.report:
         from .detectors import detect
         from .pnl import build_episodes
