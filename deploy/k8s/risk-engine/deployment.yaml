@@ -1,0 +1,81 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: pie-risk-engine
+  namespace: pie-trader
+  labels:
+    app: pie-risk-engine
+spec:
+  replicas: 2   # >1 is exactly why PortfolioLock (Redis) exists — two pods must never
+                # both approve the same correlated signal; see Critical Safety #5/#7.
+  revisionHistoryLimit: 5
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxUnavailable: 0    # never drop below `replicas` capacity mid-rollout
+      maxSurge: 1
+  selector:
+    matchLabels:
+      app: pie-risk-engine
+  template:
+    metadata:
+      labels:
+        app: pie-risk-engine
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/path: "/actuator/prometheus"
+        prometheus.io/port: "8080"
+    spec:
+      # Stateless by design (spec Phase 2): all state lives in Postgres/Redis,
+      # never in pod memory or disk, so any pod can be killed and replaced
+      # without losing anything the ledger needs.
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        fsGroup: 1000
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: pie-risk-engine
+          image: pie-trader/risk-engine:REPLACE_WITH_CI_BUILT_TAG   # spec Phase 2 "CI/CD image versioning" — never :latest in prod
+          imagePullPolicy: IfNotPresent
+          ports:
+            - containerPort: 8080
+          envFrom:
+            - configMapRef:
+                name: pie-risk-engine-config
+            - secretRef:
+                name: pie-risk-engine-secrets
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+          resources:
+            requests:
+              cpu: "250m"
+              memory: "512Mi"
+            limits:
+              cpu: "1"
+              memory: "1Gi"
+          startupProbe:
+            httpGet: { path: /actuator/health, port: 8080 }
+            failureThreshold: 30
+            periodSeconds: 2
+          livenessProbe:
+            httpGet: { path: /actuator/health/liveness, port: 8080 }
+            initialDelaySeconds: 5
+            periodSeconds: 10
+            failureThreshold: 3
+          readinessProbe:
+            httpGet: { path: /actuator/health/readiness, port: 8080 }
+            initialDelaySeconds: 5
+            periodSeconds: 5
+            failureThreshold: 3
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp   # readOnlyRootFilesystem needs a writable /tmp for the JVM
+      volumes:
+        - name: tmp
+          emptyDir: {}
+      terminationGracePeriodSeconds: 25   # > server.shutdown=graceful's 20s phase timeout

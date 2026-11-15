@@ -1,0 +1,25 @@
+# Paper trading — same rule numbers as prod, so a validated paper session
+# actually proves the rules that will run live; only the datastore and
+# broker (outside this module) are pointed at paper infrastructure.
+spring:
+  datasource:
+    url: jdbc:postgresql://${PIE_DB_HOST:postgres}:5432/pie_trader_paper
+    username: ${PIE_DB_USER:pie}
+    password: ${PIE_DB_PASSWORD:?required}
+  data:
+    redis:
+      host: ${PIE_REDIS_HOST:redis}
+      port: 6379
+pie:
+  risk:
+    capital: 200000
+    max-daily-loss: 20000
+    max-loss-per-trade: 10000
+    max-lots: 10
+    min-lots: 6
+    max-consecutive-losses: 2
+    cooldown-minutes: 15
+    no-expiry-day-entries: true
+logging:
+  level:
+    com.pietrader: INFO

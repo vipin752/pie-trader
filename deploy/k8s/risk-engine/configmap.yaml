@@ -1,0 +1,21 @@
+# Non-secret config only (spec Phase 2 "externalised configuration").
+# Everything here is also overridable by env vars at the container level —
+# see deployment.yaml envFrom — so a profile can be tuned per-cluster
+# without rebuilding the image.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: pie-risk-engine-config
+  namespace: pie-trader
+data:
+  SPRING_PROFILES_ACTIVE: "prod"
+  PIE_CAPITAL: "200000"
+  PIE_MAX_DAILY_LOSS: "20000"
+  PIE_MAX_LOSS_PER_TRADE: "10000"
+  PIE_MAX_LOTS: "10"
+  PIE_MIN_LOTS: "6"
+  PIE_MAX_CONSECUTIVE_LOSSES: "2"
+  PIE_COOLDOWN_MINUTES: "15"
+  PIE_DB_HOST: "pie-trader-postgres"   # or a managed Postgres endpoint — spec Phase 3 "use managed infra when preferable"
+  PIE_DB_NAME: "pie_trader"
+  PIE_REDIS_HOST: "pie-trader-redis"   # or a managed Redis/ElastiCache endpoint

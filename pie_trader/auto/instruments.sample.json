@@ -1,0 +1,12 @@
+{
+  "as_of": "YYYY-MM-DD — fill in the real date you pulled this",
+  "_comment": "Sample shape only. Replace with your broker's current scrip master / NSE+BSE holiday circular before use. Never commit real, dated contract data as if it stays true.",
+  "contracts": {
+    "NIFTY":      {"lot": 65, "strike_step": 50,  "expiry_weekday": 1, "exchange": "NSE", "segment": "OPTIDX", "tick_size": 0.05},
+    "BANKNIFTY":  {"lot": 30, "strike_step": 100, "expiry_weekday": 1, "exchange": "NSE", "segment": "OPTIDX", "tick_size": 0.05},
+    "FINNIFTY":   {"lot": 40, "strike_step": 50,  "expiry_weekday": 1, "exchange": "NSE", "segment": "OPTIDX", "tick_size": 0.05},
+    "MIDCPNIFTY": {"lot": 75, "strike_step": 25,  "expiry_weekday": 1, "exchange": "NSE", "segment": "OPTIDX", "tick_size": 0.05},
+    "SENSEX":     {"lot": 20, "strike_step": 100, "expiry_weekday": 3, "exchange": "BSE", "segment": "BSXOPT", "tick_size": 0.05}
+  },
+  "holidays": ["2026-01-26", "2026-03-04"]
+}

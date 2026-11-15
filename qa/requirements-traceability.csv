@@ -1,0 +1,42 @@
+requirement,implementation_file,existing_test,missing_test,result
+Trade statement parsing (Mirae xlsx),pie_trader/parsers/mirae.py,tests/test_parsers.py,-,IMPLEMENTED
+Trade statement parsing (generic CSV),pie_trader/parsers/generic_csv.py,tests/test_parsers.py,-,IMPLEMENTED
+Trade statement parsing (broker P&L statement xlsx),pie_trader/parsers/pnl_statement.py,tests/test_reconciliation.py,-,IMPLEMENTED
+FIFO position accounting,pie_trader/pnl.py:build_episodes,tests/test_engine.py,-,IMPLEMENTED
+Duplicate-fill idempotency (LED-018),pie_trader/pnl.py:dedupe_by_trade_id,tests/test_engine.py;tests/test_properties.py,-,IMPLEMENTED (fixed this session - DEF-005)
+Charge estimation,pie_trader/pnl.py:estimate_charges,tests/test_engine.py,-,IMPLEMENTED (modelled estimate; not real broker rates)
+Behavioural mistake detectors,pie_trader/detectors.py,tests/test_engine.py,-,IMPLEMENTED
+Capital/risk management (RuleSet - Python),pie_trader/rules.py:RuleSet,tests/test_engine.py,-,IMPLEMENTED
+Capital/risk management (deterministic - Java),java/pie-risk-engine RiskRules+RiskEngineService,RiskEngineServiceIT.java;TradeCandidateTest.java,-,IMPLEMENTED (this session)
+Risk engine as final authority / audit trail,java RiskEngineService.audit(),RiskEngineServiceIT.approves_a_clean_trade_and_writes_an_audit_row,-,IMPLEMENTED
+Minimum lot / lot-multiple validation,java RiskEngineService.decide();pie_trader/rules.py,RiskEngineServiceIT.rejects_quantity_not_a_multiple_of_lot_size,-,IMPLEMENTED
+Stop/premium validation (RISK-007/008/009),java TradeCandidate+RiskEngineService,RiskEngineServiceIT.rejects_zero_or_inverted_stop_distance;rejects_negative_or_zero_premiums,-,IMPLEMENTED (this session)
+Daily loss limit / consecutive-loss stop,java RiskEngineService;pie_trader/rules.py:Guard,RiskEngineServiceIT;tests/test_engine.py::test_guard,-,IMPLEMENTED
+Daily limits survive restart (Critical Safety #4/#8),java DayLedgerEntity (Postgres-backed),RiskEngineServiceIT.stops_after_daily_loss_limit_and_survives_a_fresh_context_read,-,IMPLEMENTED (Postgres source of truth, not in-memory)
+Idempotent close / duplicate event protection (Critical Safety #2/#3),java CloseEventEntity+RiskEngineService.onClose,RiskEngineServiceIT.duplicate_close_event_is_applied_exactly_once,-,IMPLEMENTED (this session)
+Cross-replica lock on correlated signals (Critical Safety #5/#7),java PortfolioLock (Redis),RiskEngineServiceIT.portfolio_lock_serialises_decisions_for_the_same_correlation_group,-,IMPLEMENTED (decision step only - see Position Management gap below)
+Event timestamp correctness (not server wall-clock),java RiskController.close(occurredAt),manual live verification (see test-execution-report),automated IT test for this specific path,PARTIALLY TESTED (fixed as DEF-004; live-verified via curl, no automated IT assertion written for the controller layer itself)
+Portfolio-level exposure control (multi-index),pie_trader/auto/portfolio.py:PortfolioGuard,tests/test_auto.py::test_portfolio_backtest_blocks_simultaneous_correlated_positions,-,IMPLEMENTED (Python side; Java side is single-index decision only, cross-index exposure tracking NOT in Java yet)
+Market structure (BOS/CHoCH/liquidity/sweeps),pie_trader/auto/structure.py,tests/test_auto.py,-,IMPLEMENTED
+SMC (order blocks/FVG/premium-discount/OTE),pie_trader/auto/smc.py,tests/test_auto.py,-,IMPLEMENTED
+Market Direction Engine (15/30/60/D/W/M),pie_trader/auto/direction.py,tests/test_auto.py,-,IMPLEMENTED
+Market regime classification,pie_trader/auto/regime.py,tests/test_auto.py,-,IMPLEMENTED (price-based only; VIX/PCR/OI explicitly unavailable)
+Volatility/ATR per timeframe,pie_trader/auto/volatility.py,tests/test_auto.py,-,IMPLEMENTED
+Instrument master (5 indices),pie_trader/auto/instruments.py,tests/test_auto.py,-,IMPLEMENTED (static fallback table; NOT refreshed from a live broker feed)
+Chart B option-premium validation (dual-chart §3),pie_trader/auto/premium.py,tests/test_auto.py::test_premium_chart_gate_blocks_worthless_or_wide_spread,-,IMPLEMENTED (modelled spread, not a real bid/ask quote)
+Dual-chart API / dashboard (/api/analytics/dual-chart; side-by-side UI),-,-,full suite,NOT_IMPLEMENTED - no API endpoint, no dashboard, no chart-snapshot storage exist
+Option-chain / PCR / OI / IV / Greeks intelligence,-,-,full suite,NOT_IMPLEMENTED - no market-data feed connected
+Futures intelligence / OI / basis,-,-,full suite,NOT_IMPLEMENTED
+India VIX intelligence,-,-,full suite,NOT_IMPLEMENTED - no data feed
+Tick-based trade management (real ticks),pie_trader/auto/engine.py (candle-based only),tests/test_auto.py,tick-level test suite,PARTIALLY IMPLEMENTED - R-ratchet trailing works on CANDLES, not live ticks; no tick ingestion exists
+Order execution (broker orders, fills, partial fills),pie_trader/auto/broker.py:PaperBroker,tests/test_auto.py,full order-lifecycle suite,PARTIALLY IMPLEMENTED - paper broker only; no real order/fill/partial-fill/cancel handling exists
+Broker reconciliation / idempotent order submission,pie_trader/auto/brokers/angelone.py (scaffold, raises NotImplementedError),-,full suite,NOT_IMPLEMENTED - adapter is intentionally unvalidated
+Position management service (independent of risk decision),-,-,full suite,NOT_IMPLEMENTED - risk-engine only decides; nothing tracks an open position's lifecycle as its own entity
+Ledger/statement reconciliation against a real broker statement,pie_trader/parsers/pnl_statement.py,tests/test_reconciliation.py,-,IMPLEMENTED this session - parser-fidelity verified against real statement totals; cross-file (two different accounts) reconciliation found NOT APPLICABLE - see reconciliation-report.md
+Database persistence (Postgres - risk/audit),java db/migration/V1__risk_schema.sql + 3 repositories,RiskEngineServiceIT (Testcontainers, real Postgres),-,IMPLEMENTED this session
+Kafka producers/consumers,-,-,full suite,NOT_IMPLEMENTED - no topics, no producer/consumer code exists anywhere
+FastAPI service for Python analytics,-,-,full suite,NOT_IMPLEMENTED - pie_trader is a CLI/library today, not an HTTP service
+Frontend (Next.js dashboard),-,-,full suite,NOT_IMPLEMENTED - no frontend code exists
+Dockerfiles (Java/Python/Frontend),java/pie-risk-engine/Dockerfile (Java only),manual build+run verification (test-execution-report),-,PARTIALLY IMPLEMENTED - Java only; no Python or frontend Dockerfile (neither has a deployable service yet)
+Docker Compose (dev/test/integration/paper),deploy/compose/*.yml,manual live verification all 4 profiles (test-execution-report),automated compose-level CI test,IMPLEMENTED this session - all 4 profiles built and health-checked live
+Kubernetes manifests (readiness, not deployment),deploy/k8s/risk-engine/*.yaml,YAML-schema validation only (no live cluster in this sandbox),live cluster apply + rollout test,PARTIALLY IMPLEMENTED - syntactically valid manifests written; NEVER applied to a real cluster (explicitly out of scope per the owner's own spec until "multi-node availability... justify")
