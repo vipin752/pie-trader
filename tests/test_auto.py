@@ -238,3 +238,57 @@ def test_smc_premium_discount_and_ote():
     assert smc.in_ote(130, "up") is True      # 62–79% pocket: 121..138
     assert smc.in_ote(160, "up") is False
     assert smc.in_ote(170, "down") is True
+
+
+def test_market_direction_engine_multi_tf_and_insufficient_data():
+    from pie_trader.auto.direction import MarketDirectionEngine
+
+    eng = MarketDirectionEngine()
+    t = dt.datetime(2026, 11, 2, 9, 15)  # a Monday
+    px = 100.0
+    for day in range(10):  # ~2 trading weeks: not enough for a Weekly/Monthly read
+        for bar in range(75):  # one full trading day of 5m bars
+            step = 0.3 if bar % 4 else -0.1
+            c = Candle(t, px, px + max(step, 0) + 0.1, px + min(step, 0) - 0.1, px + step)
+            eng.update(c)
+            px += step
+            t += dt.timedelta(minutes=5)
+        t += dt.timedelta(hours=18)  # jump to next session
+
+    reads = eng.read()
+    assert set(reads) == {15, 30, 60, "D", "W", "M"}
+    # plenty of 15m/30m/60m bars by now; too few weeks for a Weekly/Monthly read yet
+    assert reads[15].name != "INSUFFICIENT_DATA"
+    assert reads["M"].name == "INSUFFICIENT_DATA"
+    overall = eng.overall()
+    assert overall.name in (
+        "STRONG_BULL", "WEAK_BULL", "STRONG_BEAR", "WEAK_BEAR", "CONFLICTING", "INSUFFICIENT_DATA",
+    )
+    assert all(tf in str(overall.evidence) for tf in ("15", "30", "60", "D", "W", "M"))
+
+
+def test_mtf_alignment_gate_blocks_against_engine_read():
+    import pie_trader.auto.engine as E
+
+    cfg = AutoConfig(require_mtf_alignment=True)
+    rules = RuleSet()
+    u = UNDERLYINGS["NIFTY"]
+    eng = E.Engine(cfg, rules, u, None, lambda con, spot, ts: 100.0)
+    # force a clean overall "up" read without needing weeks of data
+    eng.direction.overall = lambda: __import__("pie_trader.auto.regime", fromlist=["Regime"]).Regime(
+        "WEAK_BULL", "up", "n/a", ["forced"])
+    # a "down" candidate must be skipped by the gate before it reaches sizing
+    blocked = []
+    orig_skip = eng._skip
+    eng._skip = lambda why: (blocked.append(why), orig_skip(why))[1]
+    eng._open = lambda *a, **kw: blocked.append("OPENED")  # should never be called for 'down'
+    from pie_trader.auto.structure import Event, Swing
+    eng.ltf.last_low = lambda untaken=False: Swing(0, 99.0, "L")
+    eng.ltf.last_high = lambda untaken=False: Swing(0, 101.0, "H")
+    c = Candle(dt.datetime(2026, 11, 16, 9, 25), 100, 100.5, 99.5, 100)
+    eng.ltf.candles = [c]
+    eng.htf.trend = "down"
+    eng.now = c.ts  # _maybe_enter reads self.now for the session-window check
+    eng._maybe_enter(c, [Event(0, "BOS", "down", 99.0)], 0)
+    assert any("Market Direction Engine" in b for b in blocked)
+    assert "OPENED" not in blocked

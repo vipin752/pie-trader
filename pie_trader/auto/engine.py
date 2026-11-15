@@ -10,6 +10,7 @@ from ..rules import Guard, RuleSet
 from .broker import Broker
 from .candles import Candle
 from .options import OptionContract, Underlying, choose_contract, size_lots
+from .direction import MarketDirectionEngine
 from .regime import classify
 from .smc import SMC
 from .structure import Event, Structure
@@ -45,6 +46,9 @@ class AutoConfig:
     min_stop_pct: float = 0.0005
     max_stop_pct: float = 0.006
     min_rr_to_target: float = 2.0           # take only trades with ≥1:2 room to the next liquidity
+    require_mtf_alignment: bool = False     # skip entries that disagree with the Market Direction
+                                            # Engine's overall 15m/30m/60m/D/W/M read (off by default:
+                                            # it only starts voting once weeks/months of data exist)
     risk_per_trade: float = 1500.0          # ₹ lost if the stop is hit
     max_capital_frac: float = 0.25
     itm_steps: int = 0
@@ -89,6 +93,8 @@ class Position:
     risk_inr: float = 0.0
     regime: str = "n/a"
     vol_state: str = "n/a"
+    mtf_direction: str = "n/a"
+    mtf_direction: str = "n/a"
     partial_done: bool = False
     realised: float = 0.0
     log: list = field(default_factory=list)
@@ -120,6 +126,7 @@ class ClosedTrade:
     sessions: int
     regime: str = "n/a"
     vol_state: str = "n/a"
+    mtf_direction: str = "n/a"
 
 
 class Engine:
@@ -141,6 +148,7 @@ class Engine:
         self._reverse_hint = None  # (direction, bar idx) set by a profitable CHoCH exit
         self.vol = VolatilityEngine()
         self.smc = SMC(self.ltf)
+        self.direction = MarketDirectionEngine()
         self._or: dict = {}        # opening 15m range per day: open/close/body fib levels
         self._sma: list = []       # rolling closes for the SMA filter
         self._sar_hint = None      # (direction, bar idx) armed by a failed-breakout stop-out
@@ -163,6 +171,7 @@ class Engine:
         else:
             self._day_bar += 1
         self.vol.update(self.cfg.timeframe, c)
+        self.direction.update(c)
         self._sma.append(c.close)
         if len(self._sma) > self.cfg.sma_period:
             self._sma.pop(0)
@@ -323,6 +332,11 @@ class Engine:
             if not self._sma_ok(d, c.close):
                 self._skip(f"against the {cfg.sma_period}-SMA")
                 continue
+            if cfg.require_mtf_alignment:
+                mtf = self.direction.overall()
+                if mtf.direction in ("up", "down") and mtf.direction != d:
+                    self._skip(f"against Market Direction Engine ({mtf.name})")
+                    continue
             spot = c.close
             buf = spot * cfg.stop_buffer_pct
             stop = stop - buf if d == "up" else stop + buf
@@ -370,8 +384,9 @@ class Engine:
         reg = classify(self.htf, self.ltf, self.vol, cfg.timeframe)
         self.pos = Position(con, d, qty, f.price, spot, stop, stop, target, self.now, i, setup, {self.now.date()},
                             init_qty=qty, risk_inr=(f.price - stop_prem) * qty)
-        self.pos.log.insert(0, f"regime={reg.name} vol={reg.vol_state} | " + "; ".join(reg.evidence))
-        self.pos.regime, self.pos.vol_state = reg.name, reg.vol_state
+        mtf = self.direction.overall()
+        self.pos.log.insert(0, f"regime={reg.name} vol={reg.vol_state} mtf={mtf.name} | " + "; ".join(reg.evidence))
+        self.pos.regime, self.pos.vol_state, self.pos.mtf_direction = reg.name, reg.vol_state, mtf.name
         self.pos.log.append(f"{self.now:%d %b %H:%M} {setup} entry {qty} @ {f.price} spot {spot:.1f} stop {stop:.1f}")
 
     # ── management ──
@@ -389,7 +404,7 @@ class Engine:
             self.closed.append(ClosedTrade(p.contract.symbol, p.setup, p.direction, p.opened, self.now,
                                            p.init_qty, p.entry_prem, p.realised,
                                            p.realised / init_risk_inr, reason, len(p.sessions),
-                                           p.regime, p.vol_state))
+                                           p.regime, p.vol_state, p.mtf_direction))
             self.pos = None
 
     def _manage(self, c: Candle, events: list[Event], i: int):

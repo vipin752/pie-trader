@@ -40,3 +40,48 @@ def resample(candles: list[Candle], minutes: int) -> list[Candle]:
         else:
             out.append(Candle(key, c.open, c.high, c.low, c.close, c.volume))
     return out
+
+
+@dataclass
+class PeriodAggregator:
+    """Rolls candles into whatever period `key_fn` defines (an intraday
+    minute bucket, a calendar day, an ISO week, a calendar month, ...).
+    `update` returns the just-completed bar when the period rolls over,
+    else None — so callers can feed a Structure/ATR only on a closed bar."""
+    key_fn: "callable"
+    _key: object = None
+    _bar: "Candle | None" = None
+
+    def update(self, c: Candle):
+        k = self.key_fn(c)
+        if self._bar is None or k != self._key:
+            done = self._bar
+            self._key, self._bar = k, Candle(c.ts, c.open, c.high, c.low, c.close, c.volume)
+            return done
+        b = self._bar
+        b.high, b.low, b.close = max(b.high, c.high), min(b.low, c.low), c.close
+        b.volume += c.volume
+        return None
+
+    def flush(self):
+        """Return the in-progress bar (e.g. at end of data), or None."""
+        return self._bar
+
+
+def minute_key(minutes: int):
+    def key(c: Candle):
+        m = (c.ts.hour * 60 + c.ts.minute - 555) // minutes * minutes + 555
+        return c.ts.date(), m
+    return key
+
+
+def daily_key(c: Candle):
+    return c.ts.date()
+
+
+def weekly_key(c: Candle):
+    return c.ts.date().isocalendar()[:2]  # (ISO year, ISO week)
+
+
+def monthly_key(c: Candle):
+    return c.ts.year, c.ts.month

@@ -127,6 +127,7 @@ comparison → live only after explicit approval.
 | Trailing ladder (+1R→BE, +2R→+1R, …) | ✅ `auto/engine.py` (`trail="r_ratchet"`), candle-based now, tick-based needs a live feed |
 | Liquidity sweeps, BOS/CHoCH, PDH/PDL | ✅ `auto/structure.py` |
 | Multi-TF (exec + HTF bias + daily levels) | ✅ partial: 5m exec, 15m bias, daily PDH/PDL. Full independent selection engine: pending |
+| Market Direction Engine (15m/30m/60m/Daily/**Weekly/Monthly**) | ✅ `auto/direction.py` — independent Structure per timeframe, combined into one overall read; D/W/M agreement decides STRONG vs WEAK. Optional entry gate (`require_mtf_alignment`, off by default). Weekly/Monthly read as INSUFFICIENT_DATA until enough calendar weeks/months of candles exist |
 | ATR & volatility per timeframe, percentiles | ✅ `auto/volatility.py` |
 | Market regime classification | ✅ first version: `auto/regime.py` (price-based; VIX/breadth inputs pending data feeds) |
 | PDH/PDL breakout setup, 26-SMA filter, stop-and-reverse | ✅ `auto/engine.py` |

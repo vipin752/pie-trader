@@ -71,7 +71,7 @@ Point a TradingView alert at `http://<your-host>:8787/tv` with message
 `{"secret":"<random>","signal":"bos_up","price":{{close}},"time":"{{timenow}}"}`.
 TradingView only reports what happened on the chart; PIE still applies the session window, option selection, sizing and the Guard. Live broker adapters plug into `auto/broker.py::make_broker` and require `live=True` plus your API keys in environment variables — **paper mode is the default everywhere**.
 
-See `docs/ARCHITECTURE.md` (the owner's master spec with an implementation-status map), `docs/PLAYBOOK.md` (the distilled rulebook: what is enforced in code vs manual discipline vs waiting on data feeds), `pie_trader/auto/volatility.py` (per-timeframe ATR with percentile states) and `pie_trader/auto/regime.py` (price-based regime classification; VIX/PCR/OI/breadth are marked unavailable until a data feed exists — never invented).
+See `docs/ARCHITECTURE.md` (the owner's master spec with an implementation-status map), `docs/PLAYBOOK.md` (the distilled rulebook: what is enforced in code vs manual discipline vs waiting on data feeds), `pie_trader/auto/volatility.py` (per-timeframe ATR with percentile states) and `pie_trader/auto/regime.py` (price-based regime classification; VIX/PCR/OI/breadth are marked unavailable until a data feed exists — never invented) and `pie_trader/auto/direction.py` (Market Direction Engine: an independent read on 15m, 30m, 60m, Daily, Weekly and Monthly structure, combined into one overall direction with evidence per timeframe; optional `require_mtf_alignment` entry gate).
 
 ## Layout
 
