@@ -62,7 +62,7 @@ class SslConfigTest {
             assertThat(conn.getResponseCode()).isGreaterThan(0);
             System.out.println("✅ Angel REST URL reachable: HTTP " + conn.getResponseCode());
         } catch (Exception e) {
-            assumeTrue(false, "Network/Angel unavailable: " + e.getMessage());
+            org.junit.jupiter.api.Assumptions.assumeTrue(false, "Network/Angel unavailable: " + e.getMessage());
         }
     }
 
@@ -80,7 +80,7 @@ class SslConfigTest {
             System.out.println("✅ Contract URL reachable: HTTP " + code
                 + " content-length=" + conn.getContentLength());
         } catch (Exception e) {
-            assumeTrue(false, "Network unavailable: " + e.getMessage());
+            org.junit.jupiter.api.Assumptions.assumeTrue(false, "Network unavailable: " + e.getMessage());
         }
     }
 }

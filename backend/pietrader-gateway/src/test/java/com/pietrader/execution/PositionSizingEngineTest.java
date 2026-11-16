@@ -3,11 +3,15 @@ package com.pietrader.execution;
 import com.pietrader.risk.RiskManager;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
+import org.junit.jupiter.api.extension.ExtendWith;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.CsvSource;
+import org.mockito.Mock;
+import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.test.util.ReflectionTestUtils;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.mockito.Mockito.lenient;
 
 /**
  * PIE TRADER — PositionSizingEngineTest
@@ -18,14 +22,22 @@ import static org.assertj.core.api.Assertions.assertThat;
  *   base.lots = 1, max.lots = 3
  *   high.confidence = 80, very.high.confidence = 90
  */
+@ExtendWith(MockitoExtension.class)
 @DisplayName("PositionSizingEngine — Confidence Tier Tests")
 class PositionSizingEngineTest {
+
+    // calculate() now also applies RiskManager.getSizingMultiplier(symbol)
+    // as a consecutive-loss sizing reduction (see PositionSizingEngine's own
+    // doc comment) — a dependency this test never wired up, so every call
+    // NPE'd on a null riskManager. A neutral 1.0 multiplier keeps this
+    // class's confidence-tier assertions unaffected by that newer feature.
+    @Mock RiskManager riskManager;
 
     private PositionSizingEngine engine;
 
     @BeforeEach
     void setUp() {
-        final RiskManager riskManager = null;
+        lenient().when(riskManager.getSizingMultiplier(org.mockito.ArgumentMatchers.anyString())).thenReturn(1.0);
         engine = new PositionSizingEngine(riskManager);
         ReflectionTestUtils.setField(engine, "defaultLotSize",            75);
         ReflectionTestUtils.setField(engine, "baseLots",                   1);

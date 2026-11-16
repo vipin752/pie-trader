@@ -52,7 +52,11 @@ public class TradeStateManager {
 
     public void savePosition(String symbol, TradeState state) {
         try {
-            redis.opsForValue().set(RedisKeys.position(symbol), objectMapper.writeValueAsString(state));
+            // DEF: RedisKeys.position()'s own javadoc documents "TTL: 1 day"
+            // but this never actually applied one — a position record with
+            // no clearPosition() call (e.g. a crash) would persist in Redis
+            // forever instead of self-expiring per the documented contract.
+            redis.opsForValue().set(RedisKeys.position(symbol), objectMapper.writeValueAsString(state), Duration.ofDays(1));
             log.info("📍 Position saved: {} → {}", symbol, state.getStrike());
         } catch (Exception e) { log.error("Failed to save position for {}", symbol, e); }
     }

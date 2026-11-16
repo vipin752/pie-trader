@@ -579,7 +579,7 @@ def oi_flow(symbol: str = Query(default="NIFTY")):
 
 FILES["requirements.txt"] = "fastapi>=0.110.0\nuvicorn[standard]>=0.29.0\nrequests>=2.31.0\n"
 
-FILES["test_scraper.py"] = '''
+FILES["check_scraper.py"] = '''
 import sys, json, logging
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 sys.path.insert(0, ".")

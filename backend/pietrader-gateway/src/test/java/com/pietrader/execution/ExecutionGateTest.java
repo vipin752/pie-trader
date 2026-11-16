@@ -184,7 +184,7 @@ class ExecutionGateTest {
 
         // Market session
         SessionDTO session = new SessionDTO();
-        session.setIsMarket(isMarket);
+        session.setMarketOpen(isMarket);
         MarketContextDTO context = new MarketContextDTO();
         context.setSymbol("NIFTY");
         context.setSession(session);

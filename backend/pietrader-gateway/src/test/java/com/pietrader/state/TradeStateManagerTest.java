@@ -32,7 +32,8 @@ class TradeStateManagerTest {
         f.setAccessible(true);
         f.set(manager, objectMapper);
 
-        when(redis.opsForValue()).thenReturn(valueOps);
+        // lenient: shared setup stub, not every test below exercises opsForValue()
+        lenient().when(redis.opsForValue()).thenReturn(valueOps);
     }
 
     // ── TRADE LOCK ────────────────────────────────────────────────────────────
@@ -68,7 +69,7 @@ class TradeStateManagerTest {
         TradeState state = new TradeState();
         state.setSymbol(SYMBOL); state.setTradeActive(true); state.setStrike("23200 PE");
         manager.savePosition(SYMBOL, state);
-        verify(valueOps).set(eq(RedisKeys.position(SYMBOL)), argThat(json -> json.contains("23200 PE")));
+        verify(valueOps).set(eq(RedisKeys.position(SYMBOL)), argThat(json -> json.contains("23200 PE")), eq(Duration.ofDays(1)));
     }
 
     @Test @DisplayName("getPosition: deserializes TradeState from Redis")
@@ -195,11 +196,14 @@ class TradeStateManagerTest {
 
     // ── SIGNAL CACHE ──────────────────────────────────────────────────────────
 
-    @Test @DisplayName("cacheSignal: stores signal with 5min TTL")
+    @Test @DisplayName("cacheSignal: stores signal with 30min TTL")
     void cacheSignal_storesWithTtl() {
+        // RedisKeys.latestSignal's own javadoc documents TTL: 30 min; this
+        // test previously expected 5 min, stale against both the code and
+        // its documentation.
         manager.cacheSignal(SYMBOL, "{\"action\":\"EXECUTE\"}");
         verify(valueOps).set(eq(RedisKeys.latestSignal(SYMBOL)),
-                eq("{\"action\":\"EXECUTE\"}"), eq(Duration.ofMinutes(5)));
+                eq("{\"action\":\"EXECUTE\"}"), eq(Duration.ofMinutes(30)));
     }
 
     @Test @DisplayName("getCachedSignal: returns stored signal")
