@@ -1,6 +1,5 @@
 package com.pietrader.execution;
 
-import com.pietrader.broker.BrokerAdapter;
 import com.pietrader.broker.model.OrderResponse;
 import com.pietrader.dto.OptionAnalyticsDTO;
 import com.pietrader.dto.decision.AutoTradeActionDTO;
@@ -11,6 +10,7 @@ import com.pietrader.dto.market.MarketContextDTO;
 import com.pietrader.execution.model.Trade;
 import com.pietrader.execution.model.TradeMode;
 import com.pietrader.risk.RiskManager;
+import com.pietrader.service.SquareOffService;
 import com.pietrader.dto.ConfidenceDTO;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
@@ -42,17 +42,22 @@ import static org.mockito.Mockito.*;
 class ExitEngineTest {
 
     @Mock PositionManager    positionManager;
-    @Mock BrokerAdapter      brokerAdapter;
     @Mock RiskManager        riskManager;
-    @Mock ModeManager        modeManager;
     @Mock TradeJournalFacade journalService;
+    // ExitEngine routes every exit through SquareOffService.squareOff(symbol,
+    // reason) now, not a direct positionManager.closePosition(...) call — this
+    // test predates that and verified the wrong target on all 6 triggers.
+    @Mock SquareOffService   squareOffService;
 
     @InjectMocks
     ExitEngine exitEngine;
 
     @BeforeEach
     void setUp() {
-        ReflectionTestUtils.setField(exitEngine, "lotSize",              75);
+        // NOTE: ExitEngine has no `lotSize` field — lot size lives on the
+        // Trade/TradeState objects registered with it, not on the engine
+        // itself. The line that used to try to set one crashed every test
+        // in this class at setUp() before it could run.
         ReflectionTestUtils.setField(exitEngine, "trailingActivatePct",  20.0);
         ReflectionTestUtils.setField(exitEngine, "trailingLockPct",      10.0);
         ReflectionTestUtils.setField(exitEngine, "timeExitStr",          "23:59"); // disabled for most tests
@@ -80,16 +85,15 @@ class ExitEngineTest {
     @Test @DisplayName("LTP ≤ SL → STOP_LOSS exit triggered")
     void stopLoss() {
         Trade trade = paperTrade("NIFTY", 200.0, 160.0, 320.0);
+        // runExitChecks() only evaluates symbols PositionManager reports as active.
         when(positionManager.getActiveSymbols()).thenReturn(List.of("NIFTY"));
-        when(positionManager.getPosition("NIFTY")).thenReturn(buildState("NIFTY", 200.0));
-        when(modeManager.currentMode()).thenReturn(TradeMode.PAPER);
 
         exitEngine.register(trade, null);
         exitEngine.onAnalyticsTick("NIFTY", tickDto("NIFTY", 155.0)); // below SL 160
 
         exitEngine.runExitChecks();
 
-        verify(positionManager).closePosition(eq("NIFTY"), anyDouble(), eq("STOP_LOSS"), anyDouble());
+        verify(squareOffService).squareOff(eq("NIFTY"), eq("STOP_LOSS"));
         verify(journalService).recordExit(eq("NIFTY"), anyDouble(), eq("STOP_LOSS"), anyDouble());
     }
 
@@ -99,15 +103,13 @@ class ExitEngineTest {
     void targetHit() {
         Trade trade = paperTrade("NIFTY", 200.0, 160.0, 320.0);
         when(positionManager.getActiveSymbols()).thenReturn(List.of("NIFTY"));
-        when(positionManager.getPosition("NIFTY")).thenReturn(buildState("NIFTY", 200.0));
-        when(modeManager.currentMode()).thenReturn(TradeMode.PAPER);
 
         exitEngine.register(trade, null);
         exitEngine.onAnalyticsTick("NIFTY", tickDto("NIFTY", 325.0)); // above target 320
 
         exitEngine.runExitChecks();
 
-        verify(positionManager).closePosition(eq("NIFTY"), anyDouble(), eq("TARGET_HIT"), anyDouble());
+        verify(squareOffService).squareOff(eq("NIFTY"), eq("TARGET_HIT"));
     }
 
     // ── Trigger 3: Trailing SL ───────────────────────────────────────────────
@@ -116,8 +118,6 @@ class ExitEngineTest {
     void trailingSl() {
         Trade trade = paperTrade("NIFTY", 200.0, 160.0, 400.0);
         when(positionManager.getActiveSymbols()).thenReturn(List.of("NIFTY"));
-        when(positionManager.getPosition("NIFTY")).thenReturn(buildState("NIFTY", 200.0));
-        when(modeManager.currentMode()).thenReturn(TradeMode.PAPER);
 
         exitEngine.register(trade, null);
 
@@ -129,7 +129,7 @@ class ExitEngineTest {
         exitEngine.onAnalyticsTick("NIFTY", tickDto("NIFTY", 210.0)); // below 216
         exitEngine.runExitChecks();
 
-        verify(positionManager).closePosition(eq("NIFTY"), anyDouble(), eq("TRAILING_SL"), anyDouble());
+        verify(squareOffService).squareOff(eq("NIFTY"), eq("TRAILING_SL"));
     }
 
     // ── Trigger 5: Gamma Flip ────────────────────────────────────────────────
@@ -138,8 +138,6 @@ class ExitEngineTest {
     void gammaFlip() {
         Trade trade = paperTrade("NIFTY", 200.0, 160.0, 400.0);
         when(positionManager.getActiveSymbols()).thenReturn(List.of("NIFTY"));
-        when(positionManager.getPosition("NIFTY")).thenReturn(buildState("NIFTY", 200.0));
-        when(modeManager.currentMode()).thenReturn(TradeMode.PAPER);
 
         exitEngine.register(trade, null);
 
@@ -154,7 +152,7 @@ class ExitEngineTest {
         exitEngine.onAnalyticsTick("NIFTY", dto);
         exitEngine.runExitChecks();
 
-        verify(positionManager).closePosition(eq("NIFTY"), anyDouble(), eq("GAMMA_FLIP"), anyDouble());
+        verify(squareOffService).squareOff(eq("NIFTY"), eq("GAMMA_FLIP"));
     }
 
     // ── Trigger 6: Opposite Signal ───────────────────────────────────────────
@@ -163,8 +161,6 @@ class ExitEngineTest {
     void oppositeSignal() {
         Trade trade = paperTrade("NIFTY", 200.0, 160.0, 400.0);
         when(positionManager.getActiveSymbols()).thenReturn(List.of("NIFTY"));
-        when(positionManager.getPosition("NIFTY")).thenReturn(buildState("NIFTY", 200.0));
-        when(modeManager.currentMode()).thenReturn(TradeMode.PAPER);
 
         exitEngine.register(trade, null); // trade is BUY
 
@@ -182,7 +178,7 @@ class ExitEngineTest {
         exitEngine.onAnalyticsTick("NIFTY", dto);
         exitEngine.runExitChecks();
 
-        verify(positionManager).closePosition(eq("NIFTY"), anyDouble(), contains("OPPOSITE_SIGNAL"), anyDouble());
+        verify(squareOffService).squareOff(eq("NIFTY"), contains("OPPOSITE_SIGNAL"));
     }
 
     // ── No exit when within range ─────────────────────────────────────────────
@@ -191,25 +187,11 @@ class ExitEngineTest {
     void noExitInRange() {
         Trade trade = paperTrade("NIFTY", 200.0, 160.0, 320.0);
         when(positionManager.getActiveSymbols()).thenReturn(List.of("NIFTY"));
-        when(positionManager.getPosition("NIFTY")).thenReturn(buildState("NIFTY", 200.0));
 
         exitEngine.register(trade, null);
         exitEngine.onAnalyticsTick("NIFTY", tickDto("NIFTY", 210.0)); // safely in range
         exitEngine.runExitChecks();
 
-        verify(positionManager, never()).closePosition(any(), anyDouble(), any(), anyDouble());
-    }
-
-    // ── Helper ────────────────────────────────────────────────────────────────
-
-    private com.pietrader.state.TradeState buildState(String symbol, double entry) {
-        com.pietrader.state.TradeState s = new com.pietrader.state.TradeState();
-        s.setSymbol(symbol);
-        s.setTradeActive(true);
-        s.setEntryPrice(entry);
-        s.setDirection("BUY");
-        s.setQuantity(75);
-        s.setStrike(symbol + "24APR23200CE");
-        return s;
+        verify(squareOffService, never()).squareOff(any(), any());
     }
 }

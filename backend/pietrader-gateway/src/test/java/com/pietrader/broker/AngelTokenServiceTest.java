@@ -22,17 +22,22 @@ class AngelTokenServiceTest {
         System.out.println("✅ Tokens: " + service.getTokenMap().size());
     }
 
-    @Test @DisplayName("All tokens OPTIDX/NFO")
+    @Test @DisplayName("All NIFTY option tokens OPTIDX/NFO")
     void allOptIdxNfo() {
-        service.getTokenMap().values().forEach(i -> {
+        // getTokenMap() is the FULL raw contract master — equities, futures,
+        // commodities (AMXIDX), SPOT entries, other segments — not just
+        // NIFTY options, so asserting this over every token is false by
+        // construction against real data. Scope to NIFTY options, like the
+        // rest of this file's tests already do via getOptions("NIFTY").
+        service.getOptions("NIFTY").forEach(i -> {
             assertThat(i.getInstrumentType()).isEqualToIgnoringCase("OPTIDX");
             assertThat(i.getExchSeg()).isEqualToIgnoringCase("NFO");
         });
     }
 
-    @Test @DisplayName("All tokens CE or PE")
+    @Test @DisplayName("All NIFTY option tokens CE or PE")
     void allCeOrPe() {
-        service.getTokenMap().values().forEach(i -> assertThat(i.getOptionType()).isIn("CE","PE"));
+        service.getOptions("NIFTY").forEach(i -> assertThat(i.getOptionType()).isIn("CE","PE"));
     }
 
     @Test @DisplayName("Strike prices positive (paisa/100 correct)")
@@ -98,7 +103,7 @@ class AngelTokenServiceTest {
         AngelInstrument s = service.getOptions("NIFTY").stream()
             .filter(i -> "PE".equals(i.getOptionType()) && i.getExpiry().equals(service.getNearestExpiry("NIFTY")))
             .findFirst().orElse(null);
-        Assumptions.assumeThat(s).isNotNull();
+        org.assertj.core.api.Assumptions.assumeThat(s).isNotNull();
         assertThat(service.findToken("NIFTY", s.getStrikePrice() + " PE")).isNotNull();
     }
 
@@ -110,7 +115,7 @@ class AngelTokenServiceTest {
         AngelInstrument s = service.getOptions("NIFTY").stream()
             .filter(i -> "PE".equals(i.getOptionType()) && i.getExpiry().equals(service.getNearestExpiry("NIFTY")))
             .findFirst().orElse(null);
-        Assumptions.assumeThat(s).isNotNull();
+        org.assertj.core.api.Assumptions.assumeThat(s).isNotNull();
         String sym = service.findTradingSymbol("NIFTY", s.getStrikePrice() + " PE");
         assertThat(sym).isNotNull().endsWith("PE");
     }

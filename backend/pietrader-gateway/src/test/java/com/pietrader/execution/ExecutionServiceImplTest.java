@@ -50,7 +50,7 @@ class ExecutionServiceImplTest {
         MarketContextDTO mkt = new MarketContextDTO();
         mkt.setSymbol("NIFTY"); mkt.setSpot(23114.5); mkt.setAtm(23100);
         SessionDTO session = new SessionDTO();
-        session.setIsMarket(true); session.setSession("MARKET");
+        session.setMarketOpen(true); session.setSession("MARKET");
         mkt.setSession(session);
 
         AutoTradeActionDTO action = new AutoTradeActionDTO();
@@ -100,7 +100,7 @@ class ExecutionServiceImplTest {
 
     private OptionAnalyticsDTO withMarket(boolean isMarket) {
         OptionAnalyticsDTO dto = fullExecuteDto();
-        dto.getMarketContext().getSession().setIsMarket(isMarket);
+        dto.getMarketContext().getSession().setMarketOpen(isMarket);
         return dto;
     }
 

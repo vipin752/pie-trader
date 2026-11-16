@@ -156,7 +156,7 @@ class TradeSignalMapperTest {
         // Market context
         ExpiryDTO expiry = new ExpiryDTO();
         expiry.setNearestExpiry("24MAR2026"); expiry.setDaysToExpiry(4); expiry.setPhase("EXPIRY_WEEK");
-        SessionDTO session = new SessionDTO(); session.setIsMarket(true); session.setSession("MARKET");
+        SessionDTO session = new SessionDTO(); session.setMarketOpen(true); session.setSession("MARKET");
         MarketContextDTO mkt = new MarketContextDTO();
         mkt.setSymbol("NIFTY"); mkt.setSpot(23114.5); mkt.setAtm(23100);
         mkt.setExpiry(expiry); mkt.setSession(session);

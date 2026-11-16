@@ -40,6 +40,12 @@ class TradingOrchestratorTest {
     @Mock PositionManager      positionManager;
     @Mock ExitEngine           exitEngine;
     @Mock TradeJournalFacade   journalService;
+    // Two more constructor dependencies TradingOrchestrator picked up since
+    // this test was written (see its own "// NEW" comment on stateMachine);
+    // execute() calls stateMachine.getPhase(symbol) unconditionally for
+    // logging, which NPE'd with no mock wired in at all.
+    @Mock com.pietrader.stats.StatsService   statsService;
+    @Mock TradeStateMachine    stateMachine;
 
     @InjectMocks
     TradingOrchestrator orchestrator;
@@ -48,7 +54,7 @@ class TradingOrchestratorTest {
 
     @Test @DisplayName("Null DTO → nothing called")
     void nullDto() {
-        orchestrator.resolveAction(null);
+        orchestrator.execute(null);
         verifyNoInteractions(modeManager, executionGate, riskManager);
     }
 
@@ -60,7 +66,7 @@ class TradingOrchestratorTest {
         @Test @DisplayName("MANUAL mode → orchestrator returns early, gate not checked")
         void manualModeSkips() {
             when(modeManager.isManualMode()).thenReturn(true);
-            orchestrator.resolveAction(buildValidDto());
+            orchestrator.execute(buildValidDto());
             verify(modeManager).isManualMode();
             verifyNoInteractions(executionGate, riskManager, orderManager);
         }
@@ -69,7 +75,7 @@ class TradingOrchestratorTest {
         void autoModeContinues() {
             when(modeManager.isManualMode()).thenReturn(false);
             when(executionGate.check(any())).thenReturn(ExecutionGate.GateResult.block("test"));
-            orchestrator.resolveAction(buildValidDto());
+            orchestrator.execute(buildValidDto());
             verify(executionGate).check(any());
         }
     }
@@ -80,7 +86,7 @@ class TradingOrchestratorTest {
     void gateBlocked() {
         when(modeManager.isManualMode()).thenReturn(false);
         when(executionGate.check(any())).thenReturn(ExecutionGate.GateResult.block("execution_ready=false"));
-        orchestrator.resolveAction(buildValidDto());
+        orchestrator.execute(buildValidDto());
         verifyNoInteractions(riskManager, orderManager, positionManager);
     }
 
@@ -92,7 +98,7 @@ class TradingOrchestratorTest {
         when(executionGate.check(any())).thenReturn(ExecutionGate.GateResult.allow());
         when(riskManager.check(anyString(), anyInt()))
             .thenReturn(RiskManagerFacade.RiskResult.block("max trades hit"));
-        orchestrator.resolveAction(buildValidDto());
+        orchestrator.execute(buildValidDto());
         verifyNoInteractions(orderManager, positionManager, exitEngine, journalService);
     }
 
@@ -104,7 +110,7 @@ class TradingOrchestratorTest {
         when(executionGate.check(any())).thenReturn(ExecutionGate.GateResult.allow());
         when(riskManager.check(anyString(), anyInt())).thenReturn(RiskManagerFacade.RiskResult.allow());
         when(sizingEngine.calculate(anyString(), anyInt(), any())).thenReturn(0);
-        orchestrator.resolveAction(buildValidDto());
+        orchestrator.execute(buildValidDto());
         verifyNoInteractions(orderManager, positionManager, exitEngine);
     }
 
@@ -118,7 +124,7 @@ class TradingOrchestratorTest {
         when(riskManager.check(anyString(), anyInt())).thenReturn(RiskManagerFacade.RiskResult.allow());
         when(sizingEngine.calculate(anyString(), anyInt(), any())).thenReturn(1);
         when(orderManager.execute(any())).thenReturn(failedTrade);
-        orchestrator.resolveAction(buildValidDto());
+        orchestrator.execute(buildValidDto());
         verifyNoInteractions(positionManager, exitEngine, journalService);
     }
 
@@ -140,7 +146,7 @@ class TradingOrchestratorTest {
         when(sizingEngine.calculate(anyString(), anyInt(), any())).thenReturn(1);
         when(orderManager.execute(any())).thenReturn(successTrade);
 
-        orchestrator.resolveAction(buildValidDto());
+        orchestrator.execute(buildValidDto());
 
         verify(positionManager).openPosition(eq(successTrade), any());
         verify(exitEngine).register(eq(successTrade), any());
@@ -157,7 +163,7 @@ class TradingOrchestratorTest {
         when(sizingEngine.calculate(anyString(), anyInt(), any())).thenReturn(1);
         when(orderManager.execute(any())).thenThrow(new RuntimeException("broker down"));
         // Should NOT throw
-        orchestrator.resolveAction(buildValidDto());
+        orchestrator.execute(buildValidDto());
     }
 
     // ── DTO builder ───────────────────────────────────────────────────────────
@@ -184,7 +190,7 @@ class TradingOrchestratorTest {
         dto.setAutoTradeDecision(atd);
 
         SessionDTO session = new SessionDTO();
-        session.setIsMarket(true);
+        session.setMarketOpen(true);
         MarketContextDTO ctx = new MarketContextDTO();
         ctx.setSymbol("NIFTY");
         ctx.setSpot(23114.5);

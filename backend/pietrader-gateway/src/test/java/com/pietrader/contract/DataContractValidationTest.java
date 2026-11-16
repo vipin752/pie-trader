@@ -116,11 +116,11 @@ class DataContractValidationTest {
         void sessionField() {
             SessionDTO s = SessionDTO.builder()
                     .session("MIDDAY")
-                    .isMarket(true)
+                    .marketOpen(true)
                     .build();
             // ✅ CORRECT field name
             assertThat(s.getSession()).isEqualTo("MIDDAY");
-            assertThat(s.getIsMarket()).isTrue();
+            assertThat(s.getMarketOpen()).isTrue();
             // NOTE: SessionDTO has NO getSessionPhase() method
         }
     }

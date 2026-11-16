@@ -154,3 +154,116 @@ This is the one property-based/concurrency claim in the master checklist
 that a single-threaded unit test cannot actually prove — this was real
 concurrent network traffic against the real running service, not a
 simulation.
+
+## `test_dev` sandbox pass — pre-existing `development` code (this session)
+
+The user cloned `test_dev` from `development` and asked for a sandbox run
+against the pre-existing, previously-unexercised parts of that branch
+(`backend/pietrader-gateway`, `analytics/`, the root/infra Compose files —
+none of this is code this QA effort wrote; it predates it). All defects
+found are recorded as DEF-009..DEF-014 in `qa/defect-register.csv`.
+
+### `backend/pietrader-gateway` (Java 21, Spring Boot) — Maven `test`
+
+Starting state: the module's own test suite did not compile at all against
+its own main sources. After fixing the compile errors (a field rename the
+tests hadn't caught up with, mocks for two constructor dependencies the
+tests predated, a wrong method under test, etc. — all test-only fixes, see
+DEF-011/012/013) plus two real production defects (DEF-009, DEF-010):
+
+```
+mvn clean test
+Tests run: 216, Failures: 0, Errors: 0, Skipped: 0
+BUILD SUCCESS
+```
+
+Real production defects found and fixed:
+- **DEF-009**: `RiskManager.onTradeClosed()` computed the daily max-loss
+  threshold as `capital * 0.05`, ignoring the dedicated, already-configured
+  `maxDailyLoss` field (`trading.max.loss`) entirely.
+- **DEF-010**: `TradeStateManager.savePosition()` wrote positions to Redis
+  with no TTL, contradicting `RedisKeys.position()`'s own documented
+  "TTL: 1 day" contract.
+
+Test-only defects found and fixed (no business logic touched; see
+DEF-011/012/013 for full detail):
+- `ExitEngineTest` never stubbed `positionManager.getActiveSymbols()`, so
+  `runExitChecks()`'s loop body — including every exit — never ran; 5 of 6
+  tests were failing on "zero interactions", the 6th was passing vacuously.
+- `ExitEngineMarketConditionTest`'s shared tick-builder set a gamma-flip
+  sentinel value that, per `ExitEngine`'s own real contract, is read as an
+  *active* flip zone (not "disabled" as intended) — so `GAMMA_FLIP` fired
+  before any of the compression/gamma/IV rules the 7 tests actually target;
+  the helper also never built the `MarketStructureDTO` the real compression
+  check reads, and every test stubbed a `positionManager.getPosition()`
+  call `ExitEngine` never makes.
+- Two stale, internally-contradictory duplicate test classes under
+  `com.pietrader.redis` (asserting a key contract that was never
+  implemented) were deleted — the real key contract they duplicated is
+  already covered by `com.pietrader.state.RedisKeysTest`/`TradeStateManagerTest`.
+
+### `java/pie-risk-engine` (this QA effort's own module) — regression check
+
+Re-run on `test_dev` after the gateway fixes above, to confirm no
+cross-contamination:
+
+```
+mvn test            → Tests run: 3,  Failures: 0, Errors: 0   (TradeCandidateTest)
+mvn clean verify    → Tests run: 11, Failures: 0, Errors: 0   (RiskEngineServiceIT, real Postgres+Redis via Testcontainers)
+```
+
+Matches the 14/14 baseline from the original QA pass — unchanged.
+
+### `pie_trader/` (this QA effort's own package) — regression check
+
+```
+python3 -m pytest -q
+42 passed
+```
+
+Matches the 42/42 baseline — unchanged.
+
+### `analytics/` (pre-existing Python service, not written by this QA effort)
+
+`analytics/tests/` (`test_execution_flow.py`, `test_data_contract.py`) had
+never been run in this sandbox. Its two declared dependencies
+(`kafka-python`, `psycopg2-binary` — both already listed in
+`analytics/requirements.txt`) simply weren't installed yet in this
+container; once installed:
+
+```
+cd analytics && python3 -m pytest -q
+88 passed in 0.35s
+```
+
+**DEF-014**: four files under `analytics/option_intelligence/` were named
+with pytest's `test_*.py` discovery prefix (`test_nse.py`,
+`test_all_indecies_nse.py`, `test_scraper.py`,
+`ingestion/test_nse_poll.py`) despite being manual, network-calling
+diagnostic scripts with no test framework and no assertions — one of them
+an unbounded `while True:` live-polling loop. Running `pytest` scoped to
+`analytics/` (exactly what exercising this module on its own looks like)
+would import and execute all four at collection time: real HTTPS calls to
+`nseindia.com`, and in the polling-loop case an indefinite hang. Renamed
+all four out of pytest's discovery pattern (content unchanged, still
+runnable manually); updated the one place that regenerates
+`test_scraper.py`'s content (`INSTALL.py`) to match. Root `pyproject.toml`'s
+`testpaths = ["tests"]` means a plain `pytest` from the repo root was never
+affected by this — the hazard was specific to running pytest scoped to
+`analytics/`.
+
+### Compose files — layered profiles (`deploy/compose/`) + standalone files
+
+All 4 documented profiles (`dev`/`test`/`integration`/`paper`), layered
+with their base file exactly as `deploy/README.md` instructs
+(`docker compose -f docker-compose.yml -f docker-compose.<profile>.yml`),
+validate cleanly with `docker compose config`. The two standalone,
+non-profile compose files (`docker-compose.yml`, `infrastructure/docker-compose.yml`)
+also validate cleanly on their own. No defects found.
+
+### Not exercised
+
+`ui/` is an empty placeholder (`.gitkeep` only — no frontend exists yet, as
+already documented in the master checklist's gap list). Kubernetes
+manifests were already validated schema-only in the original QA pass (not
+re-run here — no cluster available in this sandbox either).

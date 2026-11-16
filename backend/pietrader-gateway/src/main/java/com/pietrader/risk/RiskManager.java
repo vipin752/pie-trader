@@ -107,7 +107,11 @@ public class RiskManager {
             consecutiveLosses.computeIfAbsent(symbol, k -> new AtomicInteger(0)).set(0);
         }
         double totalPnl   = stateManager.getDailyPnl(symbol);
-        double maxLossInr = capital * 0.05;
+        // DEF: was `capital * 0.05`, silently ignoring the dedicated,
+        // already-configured `maxDailyLoss` field (trading.max.loss) — any
+        // negative PnL breached the moment `capital` wasn't Spring-populated
+        // (e.g. in a plain unit test), since capital defaulted to 0.
+        double maxLossInr = maxDailyLoss;
         if (totalPnl <= -maxLossInr) {
             stateManager.setMaxLossBreach(symbol);
             log.error("🚨 [{}] MAX DAILY LOSS HIT ₹{}", symbol, totalPnl);

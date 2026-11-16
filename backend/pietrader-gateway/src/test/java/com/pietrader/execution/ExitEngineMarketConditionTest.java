@@ -5,7 +5,9 @@ import com.pietrader.dto.ConfidenceDTO;
 import com.pietrader.dto.dealer.DealerInventoryModelDTO;
 import com.pietrader.dto.dealer.DealerPositioningDTO;
 import com.pietrader.dto.dealer.GammaDTO;
+import com.pietrader.dto.market.CompressionDTO;
 import com.pietrader.dto.market.MarketContextDTO;
+import com.pietrader.dto.market.MarketStructureDTO;
 import com.pietrader.dto.volatility.VolatilityContextDTO;
 import com.pietrader.execution.model.Trade;
 import com.pietrader.execution.model.TradeMode;
@@ -52,7 +54,10 @@ class ExitEngineMarketConditionTest {
         ReflectionTestUtils.setField(exitEngine, "trailingActivatePct", 20.0);
         ReflectionTestUtils.setField(exitEngine, "trailingLockPct",     10.0);
         ReflectionTestUtils.setField(exitEngine, "timeExitStr",         "23:59"); // disabled
-        ReflectionTestUtils.setField(exitEngine, "highIvThreshold",     30.0);
+        // NOTE: ExitEngine has no `highIvThreshold` field — isHighIv()/isLowIv()
+        // compare the volatility-regime STRING directly ("HIGH_IV"/"LOW_IV"),
+        // not a numeric threshold. The line that used to try to set one here
+        // crashed every test in this class at setUp() before it could run.
     }
 
     // ── Rule 7: Compression → quick profit exit ───────────────────────────────
@@ -61,7 +66,6 @@ class ExitEngineMarketConditionTest {
     void compressionQuickProfit() {
         registerTrade("NIFTY", 200.0, 160.0, 400.0);
         when(positionManager.getActiveSymbols()).thenReturn(List.of("NIFTY"));
-        when(positionManager.getPosition("NIFTY")).thenReturn(buildState("NIFTY", 200.0));
 
         // Price at 220 (in profit), regime = SIDEWAYS (compression)
         OptionAnalyticsDTO dto = tickDto("NIFTY", 220.0, "SIDEWAYS", "NEUTRAL_IV", null);
@@ -77,7 +81,6 @@ class ExitEngineMarketConditionTest {
     void negativeGammaHold() {
         registerTrade("NIFTY", 200.0, 160.0, 400.0);
         when(positionManager.getActiveSymbols()).thenReturn(List.of("NIFTY"));
-        when(positionManager.getPosition("NIFTY")).thenReturn(buildState("NIFTY", 200.0));
 
         // Price in profit, negative gamma → should NOT exit
         OptionAnalyticsDTO dto = tickDto("NIFTY", 220.0, "BULLISH", "LOW_IV", -5000.0);
@@ -93,7 +96,6 @@ class ExitEngineMarketConditionTest {
     void positiveGammaQuickExit() {
         registerTrade("NIFTY", 200.0, 160.0, 400.0);
         when(positionManager.getActiveSymbols()).thenReturn(List.of("NIFTY"));
-        when(positionManager.getPosition("NIFTY")).thenReturn(buildState("NIFTY", 200.0));
 
         // Price in profit, positive gamma → quick exit
         OptionAnalyticsDTO dto = tickDto("NIFTY", 220.0, "BULLISH", "LOW_IV", 3000.0);
@@ -109,7 +111,6 @@ class ExitEngineMarketConditionTest {
     void highIvFastExit() {
         registerTrade("NIFTY", 200.0, 160.0, 400.0);
         when(positionManager.getActiveSymbols()).thenReturn(List.of("NIFTY"));
-        when(positionManager.getPosition("NIFTY")).thenReturn(buildState("NIFTY", 200.0));
 
         OptionAnalyticsDTO dto = tickDto("NIFTY", 220.0, "BULLISH", "HIGH_IV", null);
         exitEngine.onAnalyticsTick("NIFTY", dto);
@@ -124,7 +125,6 @@ class ExitEngineMarketConditionTest {
     void lowIvHold() {
         registerTrade("NIFTY", 200.0, 160.0, 400.0);
         when(positionManager.getActiveSymbols()).thenReturn(List.of("NIFTY"));
-        when(positionManager.getPosition("NIFTY")).thenReturn(buildState("NIFTY", 200.0));
 
         // Only 10% gain, LOW_IV regime — exit engine should hold
         OptionAnalyticsDTO dto = tickDto("NIFTY", 210.0, "BULLISH", "LOW_IV", null);
@@ -140,7 +140,6 @@ class ExitEngineMarketConditionTest {
     void slTrumpsAll() {
         registerTrade("NIFTY", 200.0, 160.0, 400.0);
         when(positionManager.getActiveSymbols()).thenReturn(List.of("NIFTY"));
-        when(positionManager.getPosition("NIFTY")).thenReturn(buildState("NIFTY", 200.0));
 
         // Price below SL, regime = BULLISH (doesn't matter — SL wins)
         OptionAnalyticsDTO dto = tickDto("NIFTY", 150.0, "BULLISH", "LOW_IV", null);
@@ -154,7 +153,6 @@ class ExitEngineMarketConditionTest {
     void targetTrumpsAll() {
         registerTrade("NIFTY", 200.0, 160.0, 320.0);
         when(positionManager.getActiveSymbols()).thenReturn(List.of("NIFTY"));
-        when(positionManager.getPosition("NIFTY")).thenReturn(buildState("NIFTY", 200.0));
 
         OptionAnalyticsDTO dto = tickDto("NIFTY", 325.0, "BULLISH", "HIGH_IV", null);
         exitEngine.onAnalyticsTick("NIFTY", dto);
@@ -174,26 +172,28 @@ class ExitEngineMarketConditionTest {
         exitEngine.register(trade, null);
     }
 
-    private com.pietrader.state.TradeState buildState(String symbol, double entry) {
-        com.pietrader.state.TradeState s = new com.pietrader.state.TradeState();
-        s.setSymbol(symbol); s.setTradeActive(true);
-        s.setEntryPrice(entry); s.setDirection("BUY"); s.setQuantity(75);
-        s.setStrike(symbol + "24APR23200CE");
-        return s;
-    }
-
     private OptionAnalyticsDTO tickDto(String symbol, double ltp, String regime,
                                         String ivRegime, Double gamma) {
+        // NOTE: MarketContextDTO has no `regime` field and VolatilityContextDTO
+        // has no `ivRegime` field (see ExitEngine's own doc comments: the real
+        // IV regime path is DealerInventoryModelDTO.volatilityRegime via
+        // DealerPositioningDTO, not VolatilityContextDTO). `regime` ("SIDEWAYS")
+        // maps onto the one real compression signal ExitEngine reads —
+        // MarketStructureDTO.compression.compressionDetected.
         MarketContextDTO ctx = new MarketContextDTO();
-        ctx.setSymbol(symbol); ctx.setSpot(ltp); ctx.setRegime(regime);
+        ctx.setSymbol(symbol); ctx.setSpot(ltp);
 
         VolatilityContextDTO vol = new VolatilityContextDTO();
-        vol.setIvRegime(ivRegime);
 
         GammaDTO gammaDto = new GammaDTO();
         gammaDto.setNetGamma(gamma);
         DealerInventoryModelDTO inv = new DealerInventoryModelDTO();
-        inv.setGammaFlip(Double.MAX_VALUE);
+        inv.setVolatilityRegime(ivRegime);
+        // gammaFlip left null (no active flip zone): ExitEngine.isGammaFlip()
+        // treats ANY non-null positive value as an active flip, which would
+        // short-circuit evaluate() before the compression/gamma/IV rules
+        // under test here are ever reached — see the GAMMA_FLIP trigger
+        // test in ExitEngineTest for that rule covered on its own.
         DealerPositioningDTO dealer = new DealerPositioningDTO();
         dealer.setGamma(gammaDto);
         dealer.setDealerInventoryModel(inv);
@@ -202,6 +202,11 @@ class ExitEngineMarketConditionTest {
         dto.setMarketContext(ctx);
         dto.setVolatilityContext(vol);
         dto.setDealerPositioning(dealer);
+
+        if ("SIDEWAYS".equalsIgnoreCase(regime)) {
+            CompressionDTO compression = CompressionDTO.builder().compressionDetected(true).build();
+            dto.setMarketStructure(MarketStructureDTO.builder().compression(compression).build());
+        }
 
         ConfidenceDTO conf = new ConfidenceDTO();
         conf.setConfidenceScore(50); // below threshold so no opposite signal trigger

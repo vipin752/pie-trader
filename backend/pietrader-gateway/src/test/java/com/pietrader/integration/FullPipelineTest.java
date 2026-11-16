@@ -48,11 +48,20 @@ import static org.mockito.Mockito.*;
 @DisplayName("Full Pipeline Integration — Python Signal to Paper Order")
 class FullPipelineTest {
 
-    @Mock KafkaTemplate<String,String>        kafkaTemplate;
-    @Mock com.pietrader.broker.BrokerAdapter   brokerAdapter;
-    @Mock StringRedisTemplate                  redis;
-    @Mock ValueOperations<String,String>       valueOps;
-    @Mock TradeSignalService                   tradeSignalService;
+    @Mock KafkaTemplate<String,String>          kafkaTemplate;
+    @Mock com.pietrader.broker.BrokerAdapter     brokerAdapter;
+    @Mock StringRedisTemplate                    redis;
+    @Mock ValueOperations<String,String>         valueOps;
+    @Mock TradeSignalService                     tradeSignalService;
+    // AnalyticsConsumer's constructor grew two dependencies (breakout-trigger
+    // mutation + state machine, see AnalyticsConsumer's own doc comment on its
+    // "six independent steps" design). Left unstubbed on purpose: step 2
+    // (breakout trigger) is wrapped in its own try-catch and is non-fatal, and
+    // none of these tests build their execution_ready/action state through
+    // it — they set it directly in the raw signal JSON (see execute()) — so a
+    // bare mock preserves every existing test's behaviour unchanged.
+    @Mock com.pietrader.execution.BreakoutTriggerEngine breakoutTriggerEngine;
+    @Mock com.pietrader.execution.TradeStateMachine     stateMachine;
 
     private TradeStateManager     stateManager;
     private RiskManager           riskManager;
@@ -85,7 +94,7 @@ class FullPipelineTest {
         ReflectionTestUtils.setField(executionService, "lotSize",         75);
         ReflectionTestUtils.setField(executionService, "cooldownMinutes", 5);
 
-        consumer = new AnalyticsConsumer(executionService, tradeSignalService, mapper);
+        consumer = new AnalyticsConsumer(executionService, tradeSignalService, stateManager, redis, mapper, breakoutTriggerEngine, stateMachine);
     }
 
     @Test @DisplayName("TEST 1 — EXECUTE signal triggers paper order + Redis + Kafka events")
@@ -135,7 +144,7 @@ class FullPipelineTest {
     void test6_activePosition_blocksDouble() throws Exception {
         TradeState existing = new TradeState();
         existing.setTradeActive(true); existing.setStrike("23000 PE");
-        when(valueOps.get(argThat(k -> k.startsWith("position:NIFTY"))))
+        when(valueOps.get(argThat((String k) -> k.startsWith("position:NIFTY"))))
             .thenReturn(mapper.writeValueAsString(existing));
 
         consumer.consume(execute("NIFTY","23000 PE","DOWN",80,true,true));
@@ -147,14 +156,14 @@ class FullPipelineTest {
     void test7_squareOff() throws Exception {
         TradeState active = new TradeState();
         active.setTradeActive(true); active.setStrike("23000 PE");
-        when(valueOps.get(argThat(k -> k.startsWith("position:NIFTY"))))
+        when(valueOps.get(argThat((String k) -> k.startsWith("position:NIFTY"))))
             .thenReturn(mapper.writeValueAsString(active));
         when(brokerAdapter.squareOff("NIFTY","23000 PE",75))
             .thenReturn(OrderResponse.builder().status("SUCCESS").orderId("SQ1").build());
 
         OrderResponse resp = executionService.squareOff("NIFTY");
         assertThat(resp.getStatus()).isEqualTo("SUCCESS");
-        verify(redis).delete(argThat(k -> k.startsWith("position:NIFTY")));
+        verify(redis).delete(argThat((String k) -> k.startsWith("position:NIFTY")));
         verify(kafkaTemplate).send(eq("pie.position.events"), eq("NIFTY"), argThat(v->v.contains("CLOSED")));
         System.out.println("✅ TEST 7 PASS — square off flow verified");
     }
