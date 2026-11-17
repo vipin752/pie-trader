@@ -1,0 +1,79 @@
+@import "tailwindcss";
+@custom-variant dark (&:where(.dark, .dark *));
+
+@layer base {
+  /* PIE Trader design system: values mirror design/tokens.json and
+     design/pie.css exactly, so this app and every other PIE Trader surface
+     share one brand. The pie-prefixed names below are kept so existing
+     classes (text-pie-profit etc.) still work; the rest use the same
+     variable names design/pie.css uses, for any component that wants
+     them directly. */
+  :root {
+    --font-display: 'Inter', ui-sans-serif, system-ui, -apple-system, 'Segoe UI', sans-serif;
+    --font-sans: 'Inter', ui-sans-serif, system-ui, -apple-system, 'Segoe UI', sans-serif;
+    --font-mono: 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, monospace;
+
+    --pie-profit: #2a78d6;
+    --pie-loss: #e34948;
+    --pie-verified: #0ca30c;
+
+    --surface-0: #f6f5f2; --surface-1: #fcfcfb; --surface-2: #f0efec; --border: #e2e0da;
+    --text-primary: #0b0b0b; --text-secondary: #52514e; --text-muted: #7a7973;
+    --accent: #2a78d6; --accent-ink: #1c5cab;
+    --profit: #2a78d6; --profit-ink: #1c5cab; --loss: #e34948; --loss-ink: #b42828; --neutral: #f0efec;
+    --good: #0ca30c; --warning: #fab219; --serious: #ec835a; --critical: #d03b3b;
+  }
+
+  .dark {
+    --pie-profit: #3987e5;
+    --pie-loss: #e66767;
+    --pie-verified: #0ca30c;
+
+    --surface-0: #121211; --surface-1: #1a1a19; --surface-2: #262624; --border: #33332f;
+    --text-primary: #f0efec; --text-secondary: #c3c2b7; --text-muted: #8f8e86;
+    --accent: #3987e5; --accent-ink: #86b6ef;
+    --profit: #3987e5; --profit-ink: #86b6ef; --loss: #e66767; --loss-ink: #f09a9a; --neutral: #383835;
+  }
+
+  html {
+    font-family: var(--font-sans);
+    scroll-behavior: smooth;
+  }
+
+  h1, h2, h3, h4, .font-display {
+    font-family: var(--font-display);
+  }
+
+  .font-mono, .tabular-nums {
+    font-variant-numeric: tabular-nums;
+  }
+
+  .text-pie-profit {
+    color: var(--pie-profit);
+  }
+
+  .text-pie-loss {
+    color: var(--pie-loss);
+  }
+}
+
+/* Subtle horizontal tab scrollbars without visual clutter */
+.no-scrollbar::-webkit-scrollbar {
+  display: none;
+}
+.no-scrollbar {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+}
+
+.pb-safe {
+  padding-bottom: env(safe-area-inset-bottom, 0px);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}

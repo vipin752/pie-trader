@@ -1,0 +1,6 @@
+{
+  "name": "PIE Trader",
+  "description": "AI-Native Indian Index Options Intelligence, Probabilistic Trading, Capital Management & Execution Platform",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
