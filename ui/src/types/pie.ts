@@ -471,7 +471,9 @@ export interface LotSizingBreakdown {
   rejectedReason?: string;
 }
 
-export type GeminiChatModel = 'gemini-4-hydrogen' | 'gemini-3.1-flash-lite';
+// 'pie-genai-platform' routes to the real, self-hosted PIE GenAI Platform
+// service (Ollama-backed) via /api/ai/platform-chat, not Gemini.
+export type GeminiChatModel = 'gemini-4-hydrogen' | 'gemini-3.1-flash-lite' | 'pie-genai-platform';
 
 export interface SuccessStory {
   id: string;

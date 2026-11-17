@@ -152,6 +152,43 @@ export const ExperienceAiHub: React.FC<ExperienceAiHubProps> = ({
     setChatLoading(true);
     setChatError('');
 
+    if (selectedModel === 'pie-genai-platform') {
+      try {
+        const token = getStoredSessionToken();
+        const resp = await fetch('/api/ai/platform-chat', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            ...(token ? { 'x-pie-session': token } : {}),
+          },
+          body: JSON.stringify({ message: text }),
+        });
+        const data = await resp.json();
+        if (!resp.ok) {
+          setChatError(data.error || 'PIE GenAI Platform could not respond.');
+          return;
+        }
+
+        const modelMsg: ExperienceChatMessage = {
+          id: `m-${Date.now()}`,
+          role: 'model',
+          // Real synthesized text from the self-hosted platform, or its
+          // own honest failure message (e.g. Ollama unreachable) — never
+          // fabricated here.
+          text: data.status === 'completed' ? data.reply : data.error || 'The PIE GenAI Platform run did not complete.',
+          timestamp: new Date().toLocaleTimeString('en-IN', { hour12: false }),
+          modelUsed: 'pie-genai-platform',
+        };
+        setMessages((prev) => [...prev, modelMsg]);
+        onRefreshTelemetry?.();
+      } catch {
+        setChatError('Network error reaching /api/ai/platform-chat.');
+      } finally {
+        setChatLoading(false);
+      }
+      return;
+    }
+
     try {
       const token = getStoredSessionToken();
       const resp = await fetch('/api/experience-chat', {
@@ -331,11 +368,12 @@ export const ExperienceAiHub: React.FC<ExperienceAiHubProps> = ({
               id="gemini-model-select"
               value={selectedModel}
               onChange={(e) => setSelectedModel(e.target.value as GeminiChatModel)}
-              data-tip="Select which server-side Gemini model powers your experience coaching and product feedback synthesis."
+              data-tip="Select which model powers your experience coaching: a Gemini model, or PIE's own self-hosted GenAI Platform (Ollama-backed)."
               className="min-h-[36px] px-2.5 rounded-lg border border-slate-300 dark:border-slate-700 bg-slate-50 dark:bg-[#0B1120] text-xs font-mono text-slate-800 dark:text-slate-200 focus:outline-none focus:ring-2 focus:ring-sky-500 cursor-pointer"
             >
               <option value="gemini-4-hydrogen">gemini-4-hydrogen (Balanced)</option>
               <option value="gemini-3.1-flash-lite">gemini-3.1-flash-lite (Fast)</option>
+              <option value="pie-genai-platform">PIE GenAI Platform (Self-Hosted)</option>
             </select>
           </div>
         </div>
