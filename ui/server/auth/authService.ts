@@ -331,6 +331,96 @@ export function createOAuthAuthorizationUrl(params: {
   };
 }
 
+// ---------- Gateway access token retention (Keycloak / any OIDC provider) ----------
+//
+// backend/pietrader-gateway is a real OAuth2 resource server now (Keycloak
+// JWT, issuer/audience/permissions validated server-side there — see
+// backend/pietrader-gateway's SecurityConfig). The OIDC token exchange
+// above already receives a real access token from whichever provider is
+// configured; previously it was used once to call the userinfo endpoint
+// and then discarded, so nothing was ever forwarded to the gateway and
+// every gateway call failed its own auth. This retains it, server-side
+// only (never sent to the browser — the PIE session token above is a
+// separate, unrelated credential), and refreshes it on demand.
+interface GatewayTokenRecord {
+  provider: Exclude<AuthProviderId, 'email'>;
+  accessToken: string;
+  refreshToken?: string;
+  expiresAt: number;
+}
+
+const gatewayTokensByEmail = new Map<string, GatewayTokenRecord>();
+const TOKEN_EXPIRY_SAFETY_MARGIN_MS = 30_000;
+
+/**
+ * The access token to forward as `Authorization: Bearer` when the BFF
+ * calls backend/pietrader-gateway on this user's behalf. Refreshes via
+ * the provider's own token endpoint if the stored one is near expiry.
+ * Returns null if the user never signed in via an OIDC provider, or the
+ * token can't be refreshed (gateway calls then proceed unauthenticated,
+ * exactly as before this token-retention feature existed, and the
+ * now-secured gateway will reject them — the BFF's own fallback to
+ * local data already handles that path).
+ */
+export async function getGatewayAccessToken(email: string): Promise<string | null> {
+  const record = gatewayTokensByEmail.get(email);
+  if (!record) return null;
+
+  if (record.expiresAt - TOKEN_EXPIRY_SAFETY_MARGIN_MS > Date.now()) {
+    return record.accessToken;
+  }
+
+  if (!record.refreshToken) {
+    gatewayTokensByEmail.delete(email);
+    return null;
+  }
+
+  const cfg = getInternalOAuthConfigs()[record.provider];
+  if (!cfg.configured) {
+    gatewayTokensByEmail.delete(email);
+    return null;
+  }
+
+  try {
+    const body = new URLSearchParams({
+      grant_type: 'refresh_token',
+      client_id: cfg.clientId,
+      client_secret: cfg.clientSecret,
+      refresh_token: record.refreshToken,
+    });
+    const resp = await fetch(cfg.tokenUrl, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded', Accept: 'application/json' },
+      body: body.toString(),
+    });
+    if (!resp.ok) {
+      gatewayTokensByEmail.delete(email);
+      return null;
+    }
+    const json = (await resp.json()) as {
+      access_token?: string;
+      refresh_token?: string;
+      expires_in?: number;
+    };
+    if (!json.access_token) {
+      gatewayTokensByEmail.delete(email);
+      return null;
+    }
+    const refreshed: GatewayTokenRecord = {
+      provider: record.provider,
+      accessToken: json.access_token,
+      refreshToken: json.refresh_token ?? record.refreshToken,
+      expiresAt: Date.now() + (typeof json.expires_in === 'number' ? json.expires_in * 1000 : 60_000),
+    };
+    gatewayTokensByEmail.set(email, refreshed);
+    return refreshed.accessToken;
+  } catch {
+    // Network error reaching the provider — fail closed (no token),
+    // never fall back to the stale/expired one.
+    return null;
+  }
+}
+
 export async function exchangeOAuthCallback(params: {
   provider: Exclude<AuthProviderId, 'email'>;
   code: string;
@@ -382,7 +472,11 @@ export async function exchangeOAuthCallback(params: {
     };
   }
 
-  const tokenJson = (await tokenResp.json()) as { access_token?: string };
+  const tokenJson = (await tokenResp.json()) as {
+    access_token?: string;
+    refresh_token?: string;
+    expires_in?: number;
+  };
   if (!tokenJson.access_token) {
     return { ok: false, status: 502, error: `${cfg.label} did not return an access_token.` };
   }
@@ -437,6 +531,17 @@ export async function exchangeOAuthCallback(params: {
   const displayName = String(
     profileData.name || profileData.displayName || rawEmail.split('@')[0]
   ).slice(0, 80);
+
+  // Retain the real access token server-side so the BFF can actually
+  // authenticate to backend/pietrader-gateway on this user's behalf —
+  // see getGatewayAccessToken() above. Keyed by the same normalized
+  // email the PIE session itself uses.
+  gatewayTokensByEmail.set(rawEmail, {
+    provider: params.provider,
+    accessToken: tokenJson.access_token,
+    refreshToken: tokenJson.refresh_token,
+    expiresAt: Date.now() + (typeof tokenJson.expires_in === 'number' ? tokenJson.expires_in * 1000 : 60_000),
+  });
 
   return {
     ok: true,

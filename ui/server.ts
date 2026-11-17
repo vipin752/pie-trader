@@ -40,6 +40,7 @@ import {
   generateTotpCode,
   generateTotpSecret,
   getAuthProvidersStatus,
+  getGatewayAccessToken,
   hashPassword,
   resolveAppBaseUrl,
   signSessionToken,
@@ -445,14 +446,21 @@ app.get(
   }
 );
 
-app.get('/api/auth/session', (req: Request, res: Response) => {
+app.get('/api/auth/session', async (req: Request, res: Response) => {
   const token = extractBearerOrSessionToken(req);
   const session = verifySessionToken(token);
   if (!session) {
     res.status(401).json({ error: 'No valid or active session token.' });
     return;
   }
-  res.json({ session });
+  // Whether this session can actually reach backend/pietrader-gateway's
+  // protected routes right now — true only for a user who signed in via
+  // an OIDC/Keycloak provider and whose token (or refresh) is still
+  // valid. Email/passphrase-only sessions get real local data; they just
+  // don't get gateway-authenticated data until they also sign in via
+  // Keycloak — see server/auth/authService.ts's getGatewayAccessToken().
+  const hasGatewayAccess = Boolean(await getGatewayAccessToken(session.email.trim().toLowerCase()));
+  res.json({ session, hasGatewayAccess });
 });
 
 app.post('/api/auth/logout', (_req, res) => {
@@ -1761,17 +1769,22 @@ app.get('/api/ai/platform-chat/health', async (_req: Request, res: Response) => 
 
 // ---------- External Backend Bridge (Java Gateway :8080, Risk Engine :8081, Python FastAPI :8000) ----------
 app.post('/api/backend/probe', async (req: Request, res: Response) => {
+  const { userId } = getAuthenticatedUserId(req);
   const config: BackendConnectionConfig = {
     javaGatewayUrl: String(req.body?.javaGatewayUrl || 'http://localhost:8080'),
     javaRiskEngineUrl: String(req.body?.javaRiskEngineUrl || 'http://localhost:8081'),
     pythonAnalyticsUrl: String(req.body?.pythonAnalyticsUrl || 'http://localhost:8000'),
     preferExternalData: Boolean(req.body?.preferExternalData),
   };
-  const results = await probeBackendServices(config);
+  // Looked up server-side from this user's own OIDC/Keycloak session —
+  // never trust a client-supplied token here.
+  const gatewayAccessToken = await getGatewayAccessToken(userId);
+  const results = await probeBackendServices(config, gatewayAccessToken);
   res.json({ results });
 });
 
 app.post('/api/backend/sync', async (req: Request, res: Response) => {
+  const { userId } = getAuthenticatedUserId(req);
   const config: BackendConnectionConfig = {
     javaGatewayUrl: String(req.body?.javaGatewayUrl || 'http://localhost:8080'),
     javaRiskEngineUrl: String(req.body?.javaRiskEngineUrl || 'http://localhost:8081'),
@@ -1779,7 +1792,8 @@ app.post('/api/backend/sync', async (req: Request, res: Response) => {
     preferExternalData: Boolean(req.body?.preferExternalData),
   };
   const symbol = (req.body?.symbol as IndexSymbol) || 'NIFTY 50';
-  const synced = await fetchSyncedMarketContracts(config, symbol);
+  const gatewayAccessToken = await getGatewayAccessToken(userId);
+  const synced = await fetchSyncedMarketContracts(config, symbol, gatewayAccessToken);
   res.json(synced);
 });
 

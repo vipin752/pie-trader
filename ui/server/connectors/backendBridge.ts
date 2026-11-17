@@ -31,13 +31,17 @@ export interface JavaOptionAnalyticsDto {
 
 async function probeHttp(
   url: string,
-  timeoutMs = 2200
+  timeoutMs = 2200,
+  accessToken?: string | null
 ): Promise<{ ok: boolean; statusCode?: number; latencyMs: number; bodyText?: string; error?: string }> {
   const start = Date.now();
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
   try {
-    const resp = await fetch(url, { signal: controller.signal });
+    const resp = await fetch(url, {
+      signal: controller.signal,
+      headers: accessToken ? { Authorization: `Bearer ${accessToken}` } : undefined,
+    });
     const text = await resp.text();
     return {
       ok: resp.ok,
@@ -57,14 +61,19 @@ async function probeHttp(
 }
 
 export async function probeBackendServices(
-  config: BackendConnectionConfig
+  config: BackendConnectionConfig,
+  gatewayAccessToken?: string | null
 ): Promise<BackendServiceProbeResult[]> {
   const now = new Date().toISOString();
 
   const [gatewayRes, riskRes, pythonRes] = await Promise.all([
+    // /actuator/health itself is public (see backend/pietrader-gateway's
+    // SecurityConfig) — no token needed for this specific probe — but
+    // /api-docs (the fallback probe) is now gated behind PERM_trader.ops,
+    // so it's attempted with whatever gateway token this user has.
     probeHttp(`${config.javaGatewayUrl.replace(/\/$/, '')}/actuator/health`).then(async (r) => {
       if (r.ok) return r;
-      return probeHttp(`${config.javaGatewayUrl.replace(/\/$/, '')}/api-docs`);
+      return probeHttp(`${config.javaGatewayUrl.replace(/\/$/, '')}/api-docs`, 2200, gatewayAccessToken);
     }),
     probeHttp(`${config.javaRiskEngineUrl.replace(/\/$/, '')}/actuator/health`),
     probeHttp(`${config.pythonAnalyticsUrl.replace(/\/$/, '')}/health`).then(async (r) => {
@@ -95,7 +104,9 @@ export async function probeBackendServices(
       statusCode: gatewayRes.statusCode,
       latencyMs: gatewayRes.latencyMs,
       runtimeStack: 'Java 21 · Spring Boot 3.4.1 (Upgrade to Java 25 LTS pending)',
-      authStatus: 'Spring Security permitAll() (Phase 7 Auth pending)',
+      authStatus: gatewayAccessToken
+        ? 'Keycloak JWT resource server — forwarding this user\'s access token'
+        : 'Keycloak JWT resource server — no gateway token for this user (sign in via the OIDC/Keycloak provider to get one)',
       contractVersion: 'Swagger /swagger-ui.html · com.pietrader.dto.*',
       detail: gatewayRes.ok
         ? `Connected (${gatewayRes.statusCode}) — OptionController, DashboardController, ExecutionController ready.`
@@ -152,7 +163,8 @@ function toGatewaySymbol(indexSymbol: IndexSymbol): string | null {
 
 export async function fetchSyncedMarketContracts(
   config: BackendConnectionConfig,
-  indexSymbol: IndexSymbol
+  indexSymbol: IndexSymbol,
+  gatewayAccessToken?: string | null
 ): Promise<{
   marketContext: JavaMarketContextDto;
   optionAnalytics: JavaOptionAnalyticsDto;
@@ -168,9 +180,15 @@ export async function fetchSyncedMarketContracts(
     // The real, existing contract: GET /api/trade-card?symbol=... on
     // DashboardController, mapped by TradeCardMapper.toTradeCard() — not an
     // invented /api/dashboard/context endpoint, which does not exist.
+    // /api/trade-card requires PERM_trader.read on the gateway now — see
+    // backend/pietrader-gateway's SecurityConfig. With no token (or an
+    // unauthenticated/under-permissioned one) this 401s/403s, gwAttempt.ok
+    // is false, and the local-fallback branch below runs exactly as it
+    // already does when the gateway is simply unreachable.
     const gwAttempt = await probeHttp(
       `${gwBase}/api/trade-card?symbol=${encodeURIComponent(gatewaySymbol)}`,
-      2000
+      2000,
+      gatewayAccessToken
     );
     if (gwAttempt.ok && gwAttempt.bodyText) {
       try {
