@@ -51,6 +51,7 @@ import {
   productDevelopmentAgent,
   tradingIntelligenceAgent,
 } from './server/ai/agentOrchestrator';
+import { chatWithPlatform, platformHealth } from './server/ai/pieGenAiPlatformBridge';
 import {
   fetchSyncedMarketContracts,
   probeBackendServices,
@@ -1730,6 +1731,32 @@ app.post('/api/experience-insights', async (req: Request, res: Response) => {
 app.get('/api/ai/telemetry', (req: Request, res: Response) => {
   const { userId } = getAuthenticatedUserId(req);
   res.json(authoritativeDb.getTelemetrySnapshot(userId));
+});
+
+// ---------- Real PIE GenAI Platform bridge (self-hosted, Ollama-backed) ----------
+// Separate from the Gemini/OwnGenAi-based agents above: this talks to the
+// actual standalone pie-genai-platform service's own conversation/run
+// lifecycle (CR-005's canonical backend), not another LlmGateway adapter.
+app.post('/api/ai/platform-chat', async (req: Request, res: Response) => {
+  const { userId } = getAuthenticatedUserId(req);
+  const { message } = req.body ?? {};
+  if (!message || typeof message !== 'string' || !message.trim()) {
+    res.status(400).json({ error: 'Please enter a message to send to the PIE GenAI Platform.' });
+    return;
+  }
+
+  try {
+    const result = await chatWithPlatform(userId, message.trim());
+    res.json(result);
+  } catch (err) {
+    const status = (err as Error & { statusCode?: number }).statusCode || 502;
+    const messageErr = err instanceof Error ? err.message : 'Failed to reach the PIE GenAI Platform.';
+    res.status(status).json({ error: messageErr });
+  }
+});
+
+app.get('/api/ai/platform-chat/health', async (_req: Request, res: Response) => {
+  res.json(await platformHealth());
 });
 
 // ---------- External Backend Bridge (Java Gateway :8080, Risk Engine :8081, Python FastAPI :8000) ----------
