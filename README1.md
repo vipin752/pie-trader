@@ -78,11 +78,11 @@ Assisted trade execution through broker API.
 ## 🏗️ System Architecture
 
 ```
-            React Dashboard (Next.js 14)
+     React 19 + Vite Dashboard, served by its own Express BFF (ui/)
                       │
                       │ REST + WebSocket
                       ▼
-           API Gateway (Spring Boot 3.2)
+           API Gateway (Spring Boot 3.4.1, Keycloak JWT secured)
                       │
        ┌──────────────┼──────────────┐
        │              │              │
@@ -113,66 +113,91 @@ Core NEVER calls broker API directly — always via `BrokerAdapter` interface.
 
 | Layer            | Technology                  | Version  |
 |------------------|-----------------------------|----------|
-| Backend          | Java + Spring Boot          | 21 / 3.2 |
+| Backend (gateway)| Java + Spring Boot          | 21 / 3.4.1 |
+| Backend (risk engine) | Java + Spring Boot (separate module, `java/pie-risk-engine`) | 25 / 4.1.2 |
 | Analytics Engine | Python + FastAPI            | 3.11     |
-| Message Bus      | Apache Kafka                | 7.5      |
-| Frontend         | React + Next.js             | 18 / 14  |
+| Message Bus      | Apache Kafka                | — (see `infrastructure/docker-compose.yml`) |
+| Frontend         | React + Vite, served by its own Express BFF (`ui/`) — not Next.js | 19 |
+| Auth             | Keycloak (OAuth2/OIDC, JWT resource server) | — |
 | Primary Database | PostgreSQL                  | 16       |
 | Cache            | Redis                       | 7        |
 | Broker           | Angel One SmartAPI          | v1       |
 | Containerization | Docker + Docker Compose     | latest   |
-| State Management | Redux Toolkit               | 2.x      |
-| Build Tool       | Maven                       | 3.9+     |
+| Build Tool       | Maven (Java), npm (`ui/`), pip (`analytics/`) | — |
 
 ---
 
 ## 📦 Repository Structure
 
+The structure below is the real layout, verified against this checkout —
+not the original planning blueprint (which described a multi-module
+`pietrader-*` Maven layout and a Next.js `frontend/` that were never
+actually built this way):
+
 ```
 pie-trader/
 │
-├── docs/                              ← All design documents (push here first)
-│   ├── README_1.md                    ← This file — first commit
-│   ├── PIE-Trader-Master-Design-Doc-v1.0.docx
-│   └── ...
+├── backend/
+│   └── pietrader-gateway/             ← The one Java Spring Boot module:
+│                                          REST APIs, Keycloak JWT resource
+│                                          server, broker integration,
+│                                          Kafka producer/consumer
 │
-├── backend/                           ← Java Spring Boot services
-│   ├── pietrader-parent/              ← Maven parent POM
-│   ├── pietrader-common/              ← Shared: enums, entities, DTOs
-│   ├── pietrader-auth/                ← JWT authentication
-│   ├── pietrader-market/              ← Market data ingestion
-│   ├── pietrader-options/             ← Option chain analytics
-│   ├── pietrader-execution/           ← Broker adapter (Angel One)
-│   ├── pietrader-trader/              ← Trade journal, sessions
-│   ├── pietrader-alerts/              ← WebSocket alert delivery
-│   └── pietrader-gateway/             ← API gateway + routing
+├── java/
+│   └── pie-risk-engine/               ← Separate Java Spring Boot module —
+│                                          stateless risk/ledger service,
+│                                          its own Postgres/Redis,
+│                                          deploy/k8s/risk-engine/ manifests
 │
-├── analytics/                         ← Python FastAPI services
-│   ├── sector_engine/                 ← 9:20 AM sector momentum
-│   ├── liquidity_engine/              ← Liquidity level detection
-│   ├── gamma_engine/                  ← Black-Scholes GEX calculation
-│   ├── probability_engine/            ← Gap prediction model (Phase 3)
-│   ├── behavior_engine/               ← Trader habit detection
-│   ├── backtest_engine/               ← Walk-forward backtesting
-│   └── shared/                        ← Config, DB, Kafka utilities
+├── analytics/                         ← Python FastAPI intelligence engine
+│   ├── app.py                         ← uvicorn entrypoint
+│   ├── option_intelligence/
+│   ├── decision_engine/
+│   ├── market_data/
+│   └── kafka_utils/
 │
-├── frontend/                          ← React + Next.js dashboard
-│   └── src/
-│       ├── components/                ← Dashboard panels, WIP cards
-│       ├── pages/                     ← Next.js routes
-│       ├── store/                     ← Redux Toolkit slices
-│       ├── hooks/                     ← Custom React hooks
-│       ├── services/                  ← API service layer
-│       └── config/                    ← WIP modules, app config
+├── pie_trader/                        ← Python FIFO P&L / trade-report CLI
+│   ├── pnl.py                         ← build_episodes() — FIFO matching
+│   ├── detectors.py, rules.py, auto/  ← market-structure (SMC) detection
+│   └── cli.py
 │
-├── infrastructure/                    ← Docker, DB schema, configs
-│   ├── docker-compose.yml             ← Full local dev stack
-│   ├── postgres/init.sql              ← Complete DB schema (14 tables)
-│   └── kafka/                         ← Kafka topic configurations
+├── ui/                                ← React 19 + Vite SPA, served by its
+│   │                                     own Express BFF (server.ts) — NOT
+│   │                                     Next.js, no frontend/ directory
+│   ├── server.ts                      ← Express BFF entrypoint
+│   ├── server/
+│   │   ├── auth/authService.ts        ← Email/TOTP + OAuth2/OIDC (incl. Keycloak)
+│   │   ├── connectors/backendBridge.ts← Calls to the Java gateway
+│   │   └── ai/                        ← Gemini/OwnGenAi + PIE GenAI Platform bridge
+│   └── src/                           ← React app (components/, data/, engine/, types/)
 │
-├── .env.example                       ← Environment variable template
-├── .gitignore
-└── README.md                          ← Main README (added later)
+├── infrastructure/                    ← Docker Compose for Postgres, Redis,
+│   ├── docker-compose.yml                Kafka, the gateway, analytics, ui/
+│   └── .env.example
+│
+├── deploy/
+│   ├── compose/                       ← Separate Compose profiles
+│   │                                     (dev/test/integration/paper) for
+│   │                                     java/pie-risk-engine specifically
+│   ├── k8s/risk-engine/                ← K8s manifests for pie-risk-engine —
+│   │                                     readiness, not yet applied to a
+│   │                                     real cluster; see deploy/README.md
+│   └── README.md
+│
+├── docs/
+│   ├── LOCAL_SETUP.md                 ← Start here for local setup
+│   ├── ARCHITECTURE.md
+│   └── PLAYBOOK.md
+│
+├── qa/                                 ← Defect register, test reports,
+│                                          per-phase delivery reports
+│
+├── tests/                             ← Python tests for pie_trader/
+├── test-data/                         ← Sample broker statements, fixtures
+├── design/                            ← Design tokens, shared CSS
+│
+├── .env.example                       ← Root Docker Compose env template
+└── README1.md                         ← This file
 ```
 
 ---
@@ -243,32 +268,39 @@ com.pietrader
 
 ## ⚙️ Local Development Setup
 
+**Full step-by-step guide: [`docs/LOCAL_SETUP.md`](docs/LOCAL_SETUP.md)**
+— covers the gateway, a local Keycloak (now required — the gateway is a
+real JWT resource server), `ui/`, `analytics/`, and the companion
+`pie-genai-platform` repo. Short version below.
+
 ### Prerequisites
-- Docker Desktop
-- Java 21 (JDK)
-- Python 3.11
-- Node.js 20
-- Maven 3.9+
+- Docker (Desktop or Engine) + Docker Compose
+- Java 21 (JDK) + Maven 3.9+
+- Python 3.11+
+- Node.js 22 (20+ also works)
 
 ### Start infrastructure only (recommended for Day 1)
 ```bash
 cd infrastructure
-docker-compose up -d postgres redis kafka zookeeper kafka-ui pgadmin
+cp .env.example .env   # fill in real values first
+docker compose up -d postgres redis kafka zookeeper kafka-ui pgadmin
 ```
 
 ### Service URLs (local)
 | Service         | URL                             | Credentials                        |
 |-----------------|---------------------------------|------------------------------------|
-| pgAdmin         | http://localhost:5050           | admin@pietrader.in / pietrader@2024|
+| pgAdmin         | http://localhost:5050           | `admin@pietrader.in` / your own `PGADMIN_DEFAULT_PASSWORD` from `infrastructure/.env` — never a value committed here |
 | Kafka UI        | http://localhost:8090           | No auth                            |
-| API Gateway     | http://localhost:8080           | JWT required                       |
-| Python Analytics| http://localhost:8001/docs      | No auth (internal)                 |
-| React Frontend  | http://localhost:3000           | JWT required                       |
+| API Gateway     | http://localhost:8080           | Keycloak JWT required on every route except `/`, `/health`, `/actuator/health` |
+| Python Analytics| http://localhost:8000/docs (direct) or :8001 (via Compose) | No auth (internal) |
+| `ui/` (React + Express BFF) | http://localhost:3000 | Email/TOTP or OAuth2/OIDC (incl. Keycloak) |
+| Local Keycloak  | http://localhost:8180           | See `docs/LOCAL_SETUP.md` Step 2   |
 
 ### Environment setup
 ```bash
 cp .env.example .env
-# Add your Angel One credentials to .env
+# Add your Angel One credentials, or leave blank for a pure local-dev
+# loop with angel.startup.enabled=false — see docs/LOCAL_SETUP.md.
 ```
 
 ---
