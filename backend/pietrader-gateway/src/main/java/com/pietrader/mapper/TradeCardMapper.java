@@ -247,7 +247,7 @@ public class TradeCardMapper {
 	    if (sel.getTopCandidates() != null && !sel.getTopCandidates().isEmpty()) {
 		StrikeCandidateDTO top = sel.getTopCandidates().get(0);
 		if (top != null) {
-		    ltp    = top.getLtp()    != null ? top.getLtp()    : 0.0;
+		    ltp    = resolveSelectedLtp(dto);
 		    iv     = top.getIv()     != null ? top.getIv()     : 0.0;
 		    volume = top.getVolume() != null ? top.getVolume() : 0L;
 		}
@@ -287,6 +287,20 @@ public class TradeCardMapper {
 	return option;
     }
 
+    private static double round2(double value) {
+	return Math.round(value * 100.0) / 100.0;
+    }
+
+    /** Selected option's current LTP — same top-candidate resolution buildOption() shows. */
+    private double resolveSelectedLtp(OptionAnalyticsDTO dto) {
+	StrikeSelectionDTO sel = dto.getStrikeSelection();
+	if (sel != null && sel.getTopCandidates() != null && !sel.getTopCandidates().isEmpty()) {
+	    StrikeCandidateDTO top = sel.getTopCandidates().get(0);
+	    if (top != null && top.getLtp() != null) return top.getLtp();
+	}
+	return 0.0;
+    }
+
     // ─────────────────────────────────────────────────────────────────────────
     // RISK CARD
     // ─────────────────────────────────────────────────────────────────────────
@@ -300,6 +314,28 @@ public class TradeCardMapper {
 	risk.put("target",        "RR 1:2");
 	risk.put("max_loss",      "1% capital (₹" + (int)(capital * 0.01) + ")");
 	risk.put("capital",       capital);
+
+	// Computed per-trade levels from the selected option's own LTP — the UI's
+	// trade card needs a real strike/stop/target/potential-return it can show,
+	// not just the descriptive strings above. Target follows this project's
+	// own 1:2 minimum net-RR rule (spec §7); 1 lot, matching position_size.
+	double selectedLtp = resolveSelectedLtp(dto);
+	if (selectedLtp > 0) {
+	    double riskPerUnit   = selectedLtp * (slPct / 100.0);
+	    double stopLossPrice = selectedLtp - riskPerUnit;
+	    double targetPrice   = selectedLtp + 2 * riskPerUnit;
+	    risk.put("stop_loss_price",      round2(stopLossPrice));
+	    risk.put("target_price",         round2(targetPrice));
+	    risk.put("risk_reward_ratio",    2.0);
+	    risk.put("max_loss_inr",         round2(riskPerUnit * lotSize));
+	    risk.put("potential_return_inr", round2(riskPerUnit * 2 * lotSize));
+	} else {
+	    risk.put("stop_loss_price",      0.0);
+	    risk.put("target_price",         0.0);
+	    risk.put("risk_reward_ratio",    0.0);
+	    risk.put("max_loss_inr",         0.0);
+	    risk.put("potential_return_inr", 0.0);
+	}
 
 	// Risk management from Python
 	if (dto.getRiskManagement() != null) {

@@ -1,0 +1,13 @@
+node_modules/
+build/
+dist/
+coverage/
+.DS_Store
+*.log
+.env*
+!.env.example
+
+# Build output of `npm run build` (esbuild-bundled server.ts) — regenerate, never commit.
+server.js
+# Runtime state for the Express "authoritative desk" store — mutable data, not source.
+.data/
