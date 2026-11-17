@@ -37,13 +37,12 @@ import org.springframework.web.cors.UrlBasedCorsConfigurationSource;
  * needs its own explicit Risk Authority Review (Phase 2), not an
  * authentication change.
  *
- * SECURITY NOTE (flagged, not fixed here): {@code GET
- * /api/options/test-kafka/{symbol}} is a GET request that triggers a real
+ * DEF-019 (fixed): {@code /api/options/test-kafka/{symbol}} triggers a real
  * Python-analytics-run + Kafka-publish + AnalyticsConsumer execution cycle
  * (see its own class javadoc) — the same category of issue CR-002 fixed
- * for {@code /api/options/summary}. Gating it behind {@code PERM_trader.ops}
- * closes the practical exposure for now; it should still become a POST
- * command like {@code /api/options/trigger} in a future change.
+ * for {@code /api/options/summary}. It is now a POST (was a GET) and
+ * gated behind {@code PERM_trader.ops}, matching {@code /api/options/trigger}'s
+ * own command/not-a-query pattern.
  */
 @Configuration
 public class SecurityConfig {
@@ -70,9 +69,6 @@ public class SecurityConfig {
 
                 // ── Public ────────────────────────────────────────────────
                 .requestMatchers(HttpMethod.GET, "/", "/health", "/actuator/health").permitAll()
-                .requestMatchers(
-                    "/swagger-ui/**", "/swagger-ui.html", "/api-docs/**", "/v3/api-docs/**"
-                ).permitAll()
                 // Angel One's own browser redirect after their OAuth login page —
                 // reached directly by the user's browser, never carries our Bearer token.
                 .requestMatchers(HttpMethod.GET, "/api/broker/angel/redirect").permitAll()
@@ -82,9 +78,10 @@ public class SecurityConfig {
 
                 // ── Operations / diagnostics ──────────────────────────────
                 .requestMatchers(
-                    "/api/system/**", "/actuator/**"
+                    "/api/system/**", "/actuator/**",
+                    "/swagger-ui/**", "/swagger-ui.html", "/api-docs/**", "/v3/api-docs/**"
                 ).hasAuthority("PERM_trader.ops")
-                .requestMatchers(HttpMethod.GET, "/api/options/test-kafka/{symbol}").hasAuthority("PERM_trader.ops")
+                .requestMatchers(HttpMethod.POST, "/api/options/test-kafka/{symbol}").hasAuthority("PERM_trader.ops")
                 .requestMatchers(HttpMethod.GET, "/api/broker/status", "/api/broker/test/ltp").hasAuthority("PERM_trader.ops")
                 .requestMatchers(HttpMethod.POST, "/api/broker/test/order").hasAuthority("PERM_trader.ops")
 

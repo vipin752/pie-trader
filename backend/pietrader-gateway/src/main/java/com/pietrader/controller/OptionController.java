@@ -93,9 +93,13 @@ public class OptionController
     /**
      * Integration test: force Python to run analytics AND publish to Kafka. Java AnalyticsConsumer will receive it and
      * log "📥 Kafka received". Use this to verify the full pipeline: Python → Kafka → Java execution.
+     *
+     * DEF-019: this has a real execution-pipeline side effect (same
+     * category as CR-002), so — like /api/options/trigger — it is a
+     * command, never a GET, even though it's only used for diagnostics.
      */
-    @GetMapping("/test-kafka/{symbol}")
-    @Operation(summary = "Force Python to publish one result to pie.analytics.results")
+    @PostMapping("/test-kafka/{symbol}")
+    @Operation(summary = "Force Python to publish one result to pie.analytics.results (command, not read-only)")
     public ResponseEntity<Map<String, Object>> testKafka(@PathVariable String symbol)
     {
 	String result = pythonClient.testKafkaPublish(symbol.toUpperCase());

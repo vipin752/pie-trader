@@ -93,7 +93,7 @@ class SecurityConfigTest {
         @PostMapping("/api/options/trigger") ResponseEntity<String> optionsTrigger() { return ResponseEntity.ok("ok"); }
         @GetMapping("/api/options/dashboard/{symbol}") ResponseEntity<String> optionsDashboard(@PathVariable String symbol) { return ResponseEntity.ok("ok"); }
         @GetMapping("/api/options/python/health") ResponseEntity<String> optionsPythonHealth() { return ResponseEntity.ok("ok"); }
-        @GetMapping("/api/options/test-kafka/{symbol}") ResponseEntity<String> optionsTestKafka(@PathVariable String symbol) { return ResponseEntity.ok("ok"); }
+        @PostMapping("/api/options/test-kafka/{symbol}") ResponseEntity<String> optionsTestKafka(@PathVariable String symbol) { return ResponseEntity.ok("ok"); }
 
         @PostMapping("/api/execution/force") ResponseEntity<String> executionForce() { return ResponseEntity.ok("ok"); }
         @PostMapping("/api/execution/squareoff") ResponseEntity<String> executionSquareoff() { return ResponseEntity.ok("ok"); }
@@ -158,7 +158,7 @@ class SecurityConfigTest {
             Arguments.of(HttpMethod.GET, "/api/system/health/broker", "PERM_trader.ops"),
             Arguments.of(HttpMethod.GET, "/api/system/health/execution-gate", "PERM_trader.ops"),
             Arguments.of(HttpMethod.GET, "/api/system/pipeline", "PERM_trader.ops"),
-            Arguments.of(HttpMethod.GET, "/api/options/test-kafka/NIFTY", "PERM_trader.ops"),
+            Arguments.of(HttpMethod.POST, "/api/options/test-kafka/NIFTY", "PERM_trader.ops"),
             Arguments.of(HttpMethod.GET, "/api/broker/status", "PERM_trader.ops"),
             Arguments.of(HttpMethod.GET, "/api/broker/test/ltp", "PERM_trader.ops"),
             Arguments.of(HttpMethod.POST, "/api/broker/test/order", "PERM_trader.ops")
