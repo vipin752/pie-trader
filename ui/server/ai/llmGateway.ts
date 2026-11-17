@@ -58,6 +58,14 @@ function estimateTokens(inputText: string, outputText: string): number {
   return Math.max(1, Math.ceil((inputText.length + outputText.length) / 4));
 }
 
+/** True for provider errors that retrying can never fix (missing config, not implemented). */
+function isUnconfiguredProviderError(msg: string): boolean {
+  return (
+    msg.includes('GEMINI_API_KEY is not configured') ||
+    msg.includes('Own GenAI provider')
+  );
+}
+
 export interface LlmProviderAdapter {
   readonly providerName: string;
   invoke(params: {
@@ -138,14 +146,65 @@ class GeminiProviderAdapter implements LlmProviderAdapter {
 }
 
 /**
+ * SKELETON — PIE Trader's own GenAI provider (future work).
+ *
+ * PIE Trader is moving off a third-party vendor (Google Gemini) onto its
+ * own GenAI model/service. This adapter is the integration point for
+ * that: same LlmProviderAdapter contract as GeminiProviderAdapter above,
+ * so whichever provider is wired in, LlmGateway's retry/fallback/budget/
+ * prompt-injection-isolation logic below never changes.
+ *
+ * NOT YET IMPLEMENTED — it fails loudly rather than fabricating a
+ * response, per this project's own rule never to present invented data
+ * as fact. Intended contract once built: POST to OWN_GENAI_ENDPOINT with
+ * { model, systemInstruction, contents, history }, bearer-authenticated
+ * via OWN_GENAI_API_KEY, returning { text, tokens }.
+ */
+class OwnGenAiProviderAdapter implements LlmProviderAdapter {
+  public readonly providerName = 'PIE Trader Own GenAI (skeleton — not yet implemented)';
+
+  public async invoke(params: {
+    model: SupportedLlmModel;
+    systemInstruction: string;
+    contents: string;
+    history?: { role: 'user' | 'model'; text: string }[];
+    responseSchema?: Schema;
+    timeoutMs: number;
+  }): Promise<{ text: string; tokens?: number }> {
+    const endpoint = process.env.OWN_GENAI_ENDPOINT;
+    if (!endpoint) {
+      const err = new Error(
+        'Own GenAI provider is a skeleton only — OWN_GENAI_ENDPOINT is not configured yet. ' +
+          'Set OWN_GENAI_ENDPOINT/OWN_GENAI_API_KEY once the in-house model/service exists, ' +
+          'or construct LlmGateway with new GeminiProviderAdapter() to use the (still working) ' +
+          'Gemini adapter in the meantime.'
+      );
+      (err as Error & { statusCode?: number }).statusCode = 503;
+      throw err;
+    }
+    // TODO(own-genai): implement the real HTTP call once OWN_GENAI_ENDPOINT
+    // points at a live service. Left unimplemented on purpose — this is a
+    // template for that future work, not a disguised Gemini fallback.
+    void params;
+    const err = new Error('Own GenAI provider endpoint is configured but the client is not implemented yet.');
+    (err as Error & { statusCode?: number }).statusCode = 501;
+    throw err;
+  }
+}
+
+/**
  * Provider-Independent LLM Gateway
  * Handles retries, timeouts, fallback routing, token/cost caps, and prompt-injection isolation.
+ *
+ * Default provider is the OwnGenAiProviderAdapter skeleton above (PIE
+ * Trader's own GenAI, not yet implemented) — pass `new GeminiProviderAdapter()`
+ * explicitly if you need a working provider before that exists.
  */
 export class LlmGateway {
   private readonly adapter: LlmProviderAdapter;
   private tokensConsumedToday = 0;
 
-  constructor(adapter: LlmProviderAdapter = new GeminiProviderAdapter()) {
+  constructor(adapter: LlmProviderAdapter = new OwnGenAiProviderAdapter()) {
     this.adapter = adapter;
   }
 
@@ -191,8 +250,8 @@ export class LlmGateway {
         } catch (err) {
           lastError = err;
           const msg = err instanceof Error ? err.message : '';
-          // Do not retry missing API key
-          if (msg.includes('GEMINI_API_KEY is not configured')) {
+          // Do not retry an error retrying can never fix (missing key, not implemented)
+          if (isUnconfiguredProviderError(msg)) {
             throw err;
           }
           if (attempt < maxAttempts) {
@@ -234,7 +293,7 @@ export class LlmGateway {
       };
     } catch (primaryErr) {
       const msg = primaryErr instanceof Error ? primaryErr.message : '';
-      if (msg.includes('GEMINI_API_KEY is not configured')) {
+      if (isUnconfiguredProviderError(msg)) {
         throw primaryErr;
       }
 
