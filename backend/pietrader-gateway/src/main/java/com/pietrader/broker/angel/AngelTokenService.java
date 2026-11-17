@@ -2,7 +2,6 @@ package com.pietrader.broker.angel;
 
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.pietrader.config.SslConfig;
 import jakarta.annotation.PostConstruct;
 import lombok.Getter;
 import lombok.extern.slf4j.Slf4j;
@@ -84,7 +83,9 @@ public class AngelTokenService {
 
     public List<Map<String, Object>> loadFromUrl() {
         try {
-            SslConfig.applyGlobalSslBypass();
+            // CR-001.D: this used to call SslConfig.applyGlobalSslBypass()
+            // here too — removed along with that method. Standard JVM
+            // certificate verification applies to this download now.
             log.info("Downloading contract from: {}", contractMasterUrl);
             List<Map<String, Object>> d = mapper.readValue(new URL(contractMasterUrl).openStream(), new TypeReference<>(){});
             log.info("Live contract downloaded: {} records", d.size());

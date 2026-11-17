@@ -33,14 +33,31 @@ public class OptionController
     private final TradeStateManager stateManager;
 
     /**
-     * HTTP pull: fetch analytics from Python + trigger execution if eligible. Python auto-selects LIVE (Angel ticks) or
-     * NSE fallback.
+     * Pure read: fetch analytics from Python (or the Redis cache behind
+     * it) — never triggers execution. Safe to poll repeatedly.
      */
     @GetMapping("/summary")
-    @Operation(summary = "Fetch option analytics from Python and trigger execution")
+    @Operation(summary = "Fetch option analytics from Python (read-only, no execution)")
     public ResponseEntity<String> getSummary(@RequestParam(defaultValue = "NIFTY") String symbol)
     {
 	String result = optionService.getOptionSummary(symbol);
+	if(result == null)
+	    return ResponseEntity.internalServerError().body("{\"error\":\"Python analytics unavailable\"}");
+	return ResponseEntity.ok(result);
+    }
+
+    /**
+     * CR-002: command, not a query — explicitly triggers a fetch + signal
+     * persistence + execution cycle for `symbol`, still gated by
+     * ExecutionGate/RiskManager exactly as the Kafka path is. This used to
+     * be GET /api/options/summary itself; a financial side effect must
+     * never be reachable from a GET (master prompt CR-002 / Section 9).
+     */
+    @PostMapping("/trigger")
+    @Operation(summary = "Manually trigger a fetch + execution cycle (command, not read-only)")
+    public ResponseEntity<String> triggerAnalyticsCycle(@RequestParam(defaultValue = "NIFTY") String symbol)
+    {
+	String result = optionService.triggerAnalyticsCycle(symbol);
 	if(result == null)
 	    return ResponseEntity.internalServerError().body("{\"error\":\"Python analytics unavailable\"}");
 	return ResponseEntity.ok(result);

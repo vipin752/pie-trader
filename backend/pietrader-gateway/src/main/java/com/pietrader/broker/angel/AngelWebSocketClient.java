@@ -9,7 +9,6 @@ import org.java_websocket.handshake.ServerHandshake;
 import org.springframework.stereotype.Component;
 
 import java.net.URI;
-import javax.net.ssl.SSLContext;
 import java.nio.ByteBuffer;
 import java.util.List;
 import java.util.Map;
@@ -108,25 +107,14 @@ public class AngelWebSocketClient {
                 }
             };
 
-            // ── SSL bypass for java-websocket library ─────────────────────
-            // java-websocket does NOT pick up SSLContext.setDefault() or
-            // HttpsURLConnection.setDefaultSSLSocketFactory().
-            // Must set trust-all socket factory DIRECTLY on the client instance.
-            try {
-                javax.net.ssl.TrustManager[] trustAll = new javax.net.ssl.TrustManager[]{
-                        new javax.net.ssl.X509TrustManager() {
-                            public java.security.cert.X509Certificate[] getAcceptedIssuers() { return new java.security.cert.X509Certificate[0]; }
-                            public void checkClientTrusted(java.security.cert.X509Certificate[] c, String a) {}
-                            public void checkServerTrusted(java.security.cert.X509Certificate[] c, String a) {}
-                        }
-                };
-                SSLContext sc = SSLContext.getInstance("TLS");
-                sc.init(null, trustAll, new java.security.SecureRandom());
-                client.setSocketFactory(sc.getSocketFactory());
-                log.debug("🔓 WS SSL bypass applied");
-            } catch (Exception sslEx) {
-                log.warn("⚠️ Could not apply WS SSL bypass: {}", sslEx.getMessage());
-            }
+            // CR-001.D: this used to install a trust-all TrustManager
+            // directly on the client here (java-websocket does not pick up
+            // the JVM-wide defaults), disabling certificate verification
+            // for this WebSocket connection specifically. Removed — the
+            // client now uses java-websocket's own default SSL handling,
+            // which verifies the server certificate normally. See
+            // SslConfig's class javadoc for what to do if a PKIX error
+            // recurs against a real Angel One connection.
 
             client.connectBlocking();
 
