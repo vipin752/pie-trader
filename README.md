@@ -7,17 +7,24 @@ PIE Trader is a rule-based + data-driven options trading system using:
 - Automated execution
 - Trade journaling and performance analytics
 
+**New here?** See [`docs/LOCAL_SETUP.md`](docs/LOCAL_SETUP.md) for the
+step-by-step local setup (Docker Compose services, the Java gateway,
+`ui/`, Keycloak, and the companion
+[`pie-genai-platform`](https://github.com/vipin752/pie-genai-platform)
+repo) — including what the `deploy/k8s/` manifests actually are and why
+they're not part of local setup.
+
 ---
 
 ## System Architecture
 
 Market Data (Angel One WebSocket)
         ↓
-Java Backend (Market Engine)
+Java Backend (Market Engine) — `backend/pietrader-gateway`, Keycloak JWT secured
         ↓
 Kafka
         ↓
-Python Analytics (Intelligence Engine)
+Python Analytics (Intelligence Engine) — `analytics/`
         ↓
 Kafka
         ↓
@@ -27,7 +34,11 @@ Redis (Live Positions)
         ↓
 Postgres (Trade Journal & Stats)
         ↓
-Next.js Frontend (Decision Terminal UI)
+React + Vite Frontend, served by its own Express BFF (Decision Terminal UI) — `ui/`
+
+A separate repository, `pie-genai-platform`, provides read-only GenAI
+analysis on top of this system (never execution) — see
+[`docs/LOCAL_SETUP.md`](docs/LOCAL_SETUP.md).
 
 ---
 
@@ -41,8 +52,9 @@ Next.js Frontend (Decision Terminal UI)
 | Event Bus | Kafka |
 | Cache | Redis |
 | Database | Postgres |
-| UI | Next.js |
-| Infra | Docker |
+| UI | React 19 + Vite, served by its own Express BFF (not Next.js — there is no Next.js anywhere in this repo) |
+| Auth | Keycloak (OAuth2/OIDC, JWT resource server on the gateway) |
+| Infra | Docker Compose (local/dev); Kubernetes manifests exist for `risk-engine` only, not yet applied to a real cluster — see `deploy/README.md` |
 
 ---
 
@@ -60,9 +72,17 @@ Next.js Frontend (Decision Terminal UI)
 
 ## Run Infrastructure
 
+See [`docs/LOCAL_SETUP.md`](docs/LOCAL_SETUP.md) for the full,
+step-by-step version. Short form:
+
 ```bash
-docker-compose up -d
-=======
+cd infrastructure
+cp .env.example .env   # fill in real values — never commit a filled-in copy
+docker compose up -d
+```
+
+---
+
 # PIE Trader – System Architecture & Design Document
 
 ## 1. Project Overview
@@ -153,7 +173,7 @@ Includes:
 The platform follows a modular architecture.
 
 ```
-            Frontend (React / Next.js)
+            Frontend (React + Vite, served by its own Express BFF — `ui/`)
                      │
                      │
            API Gateway (Spring Boot)
@@ -209,7 +229,7 @@ Libraries:
 
 ## Frontend
 
-React / Next.js
+React 19 + Vite, served by its own Express BFF (`ui/`) — not Next.js.
 
 Responsibilities:
 

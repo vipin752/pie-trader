@@ -47,5 +47,5 @@ uvicorn app:app --host 0.0.0.0 --port 8000 --reload
 DATA_MODE=LIVE              # LIVE | NSE
 CONTRACT_FILE_PATH=angel_feed/OpenAPIScripMaster.json
 KAFKA_BOOTSTRAP_SERVERS=localhost:9092
-POSTGRES_URL=postgresql://pietrader:pietrader@2024@localhost:5432/pietrader
+POSTGRES_URL=postgresql://pietrader:<your-own-password>@localhost:5432/pietrader
 ```
