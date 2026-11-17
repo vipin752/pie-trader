@@ -5,73 +5,42 @@ import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.web.client.RestTemplate;
 
-import javax.net.ssl.*;
-import java.security.cert.X509Certificate;
-
 /**
- * SSL Configuration — fixes "PKIX path building failed" for Angel API.
+ * SSL Configuration.
  *
- * Angel API endpoints affected:
- *   https://apiconnect.angelbroking.com  (login, REST orders)
- *   https://margincalculator.angelbroking.com  (contract master download)
- *   wss://smartapisocket.angelone.in  (WebSocket)
+ * CR-001.D fix: this class used to apply a trust-all TrustManager and a
+ * hostname verifier that accepted any host, globally, for the entire JVM
+ * (HttpsURLConnection.setDefaultSSLSocketFactory + SSLContext.setDefault +
+ * setDefaultHostnameVerifier), called unconditionally from
+ * PietraderGatewayApplication.main() before Spring even started. That
+ * disabled certificate verification for every HTTPS connection this
+ * process makes, not just calls to Angel One — a man-in-the-middle
+ * vulnerability, present in every environment, with no way to turn it off.
  *
- * Solution: apply trust-all TrustManager BEFORE Spring starts.
- * Called from PietraderGatewayApplication.main() before SpringApplication.run().
+ * It existed to work around a "PKIX path building failed" error reported
+ * against Angel One's endpoints. The correct fix for that specific error
+ * (if it recurs against a real broker connection — not verified in this
+ * sandbox, which has no network path to Angel One) is to add Angel's CA
+ * or the missing intermediate certificate to a dedicated truststore, e.g.:
  *
- * This sets:
- *   1. HttpsURLConnection.setDefaultSSLSocketFactory  → covers login + REST + URL downloads
- *   2. SSLContext.setDefault()                        → covers Java-WebSocket library
- *   3. HttpsURLConnection.setDefaultHostnameVerifier  → covers hostname mismatch
+ *   keytool -importcert -alias angelone -file angel-ca.crt \
+ *       -keystore /path/to/truststore.jks
  *
- * NOTE: This disables certificate verification entirely.
- * For production hardening: add Angel's CA cert to src/main/resources/ssl/angel-ca.crt
- * and load it into a custom TrustStore instead.
+ * and point the JVM at it with -Djavax.net.ssl.trustStore, or load it into
+ * a Spring-managed SSLContext scoped only to the Angel HTTP client. Do not
+ * reintroduce a global or trust-all bypass.
  */
 @Configuration
 @Slf4j
 public class SslConfig {
 
     /**
-     * Must be called BEFORE SpringApplication.run() in main().
-     * Applies globally to all JVM SSL connections.
-     */
-    public static void applyGlobalSslBypass() {
-        try {
-            TrustManager[] trustAll = new TrustManager[]{
-                new X509TrustManager() {
-                    public X509Certificate[] getAcceptedIssuers() { return new X509Certificate[0]; }
-                    public void checkClientTrusted(X509Certificate[] c, String a) {}
-                    public void checkServerTrusted(X509Certificate[] c, String a) {}
-                }
-            };
-
-            SSLContext sc = SSLContext.getInstance("TLS");
-            sc.init(null, trustAll, new java.security.SecureRandom());
-
-            // 1. All HttpsURLConnection calls (login, REST, contract download)
-            HttpsURLConnection.setDefaultSSLSocketFactory(sc.getSocketFactory());
-            HttpsURLConnection.setDefaultHostnameVerifier((hostname, session) -> true);
-
-            // 2. All new SSLContext instances (Java-WebSocket library picks this up)
-            SSLContext.setDefault(sc);
-
-            log.info("✅ SSL bypass active — Angel API accessible");
-
-        } catch (Exception e) {
-            log.error("❌ SSL bypass setup failed: {}", e.getMessage(), e);
-        }
-    }
-
-    /**
-     * RestTemplate that trusts all SSL certificates.
-     * Used by AngelBrokerAdapter and AngelAuthService for REST order calls.
+     * RestTemplate used by AngelBrokerAdapter and AngelAuthService for
+     * REST order calls. Standard JVM certificate verification now applies —
+     * no custom SSLContext is installed.
      */
     @Bean(name = "angelRestTemplate")
     public RestTemplate angelRestTemplate() {
-        // applyGlobalSslBypass() already set the default SSLSocketFactory,
-        // so a plain RestTemplate will use it automatically.
-        // No extra configuration needed.
         return new RestTemplate();
     }
 }

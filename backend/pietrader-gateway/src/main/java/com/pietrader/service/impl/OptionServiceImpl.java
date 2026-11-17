@@ -29,38 +29,61 @@ public class OptionServiceImpl implements OptionService {
 
     @Override
     public String getOptionSummary(String symbol) {
+        // CR-002: pure read — fetch + cache only. No signal persistence,
+        // no execution. Safe for any GET endpoint to call unconditionally,
+        // including on a cache miss. See triggerAnalyticsCycle() for the
+        // one path that intentionally does more than read.
         try {
             log.info("🔍 Fetching analytics for {}", symbol);
 
-            // Check active position first
-            if (stateManager.hasActivePosition(symbol)) {
-                log.info("⚠️ Trade already active for {}", symbol);
-                return "{\"status\":\"TRADE_ALREADY_ACTIVE\"}";
-            }
-
-            // Fetch from Python analytics engine
             String response = client.getOptionSummary(symbol);
             if (response == null || response.isBlank()) {
                 log.warn("⚠️ Empty response from analytics engine");
                 return "{\"status\":\"EMPTY_RESPONSE\"}";
             }
 
-            // Cache latest signal
+            stateManager.cacheSignal(symbol, response);
+            return response;
+
+        } catch (Exception e) {
+            log.error("❌ getOptionSummary failed for {}", symbol, e);
+            return "{\"status\":\"ERROR\",\"message\":\"" + e.getMessage() + "\"}";
+        }
+    }
+
+    @Override
+    public String triggerAnalyticsCycle(String symbol) {
+        // CR-002: the explicit command path. Everything getOptionSummary()
+        // used to do unconditionally, now reachable only from a POST.
+        try {
+            log.info("🔍 Triggering analytics cycle for {}", symbol);
+
+            if (stateManager.hasActivePosition(symbol)) {
+                log.info("⚠️ Trade already active for {}", symbol);
+                return "{\"status\":\"TRADE_ALREADY_ACTIVE\"}";
+            }
+
+            String response = client.getOptionSummary(symbol);
+            if (response == null || response.isBlank()) {
+                log.warn("⚠️ Empty response from analytics engine");
+                return "{\"status\":\"EMPTY_RESPONSE\"}";
+            }
+
             stateManager.cacheSignal(symbol, response);
 
-            // Deserialize and process
             OptionAnalyticsDTO dto = objectMapper.readValue(response, OptionAnalyticsDTO.class);
 
             // Save to DB
             tradeSignalService.process(dto);
 
-            // Run execution engine
+            // Run execution engine — still gated by ExecutionGate/RiskManager
+            // exactly as the Kafka AnalyticsConsumer path is.
             executionService.execute(dto);
 
             return response;
 
         } catch (Exception e) {
-            log.error("❌ getOptionSummary failed for {}", symbol, e);
+            log.error("❌ triggerAnalyticsCycle failed for {}", symbol, e);
             return "{\"status\":\"ERROR\",\"message\":\"" + e.getMessage() + "\"}";
         }
     }
