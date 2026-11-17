@@ -125,11 +125,17 @@ services:
       SPRING_DATA_REDIS_PORT: 6379
       SPRING_DATA_REDIS_PASSWORD: ${REDIS_PASSWORD}
       KAFKA_BOOTSTRAP_SERVERS: kafka:29092
-      JWT_SECRET: ${JWT_SECRET}
       PYTHON_ANALYTICS_URL: http://python-analytics:8001
       ANGELONE_API_KEY: ${ANGELONE_API_KEY}
       ANGELONE_CLIENT_ID: ${ANGELONE_CLIENT_ID}
       ANGELONE_TOTP_SECRET: ${ANGELONE_TOTP_SECRET}
+      # Keycloak JWT resource server — JWT_SECRET removed (never consumed by
+      # any app code; a resource server validating Keycloak-signed JWTs
+      # fetches its public signing keys from the realm's JWKS endpoint
+      # instead, no shared secret needed).
+      JWT_ISSUER_URI: ${JWT_ISSUER_URI}
+      JWT_AUDIENCE: ${JWT_AUDIENCE}
+      PIE_TRADER_FRONTEND_ORIGIN: ${PIE_TRADER_FRONTEND_ORIGIN}
     ports:
       - "8080:8080"
     depends_on:
